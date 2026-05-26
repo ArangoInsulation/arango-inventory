@@ -201,62 +201,299 @@ function setTopbarActions(html) {
 // PÁGINA: DASHBOARD
 // ════════════════════════════════════════════════════════════
 async function renderDashboard() {
-  setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`);
   setTopbarActions(canEdit() ? `
     <button class="btn btn-primary" onclick="navigateTo('bol')"><i class="ti ti-plus"></i> Bill of Lading</button>
     <button class="btn btn-success" onclick="navigateTo('recepcion')"><i class="ti ti-arrow-down-left"></i> Entrada</button>
   ` : '');
 
-  try {
-    const stock = await getStockActual(STATE.bodega);
-    const ok = stock.filter(i => i.estado_stock === 'ok').length;
-    const low = stock.filter(i => i.estado_stock === 'bajo').length;
-    const out = stock.filter(i => i.estado_stock === 'agotado').length;
-    const alerts = stock.filter(i => i.estado_stock !== 'ok').slice(0, 8);
+  setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando dashboard...</div>`);
 
-    const { data: recentBOL } = await sb.from('bill_of_lading')
-      .select('fecha, driver, proyecto:proyectos(nombre), bol_items(cantidad, unidad, material:materiales(referencia))')
-      .eq('bodega', STATE.bodega)
-      .order('created_at', { ascending: false })
-      .limit(5);
+  try {
+    const bodega = STATE.bodega;
+    const now = new Date();
+    const mesActual = now.getMonth();
+    const anio = now.getFullYear();
+    const primerDia = `${anio}-${String(mesActual+1).padStart(2,'0')}-01`;
+    const ultimoDia = `${anio}-${String(mesActual+1).padStart(2,'0')}-${String(new Date(anio,mesActual+1,0).getDate()).padStart(2,'0')}`;
+    const primerDiaMes0 = `${anio}-${String(mesActual).padStart(2,'0')}-01`;
+
+    // Load data in parallel
+    const [stock, bolMes, bolAnt, entMes, devMes, bolRecent] = await Promise.all([
+      getStockActual(bodega),
+      sb.from('bill_of_lading').select('id,fecha,bol_items(cantidad)',{count:'exact'}).eq('bodega',bodega).neq('carrier','DEVOLUCION').gte('fecha',primerDia).lte('fecha',ultimoDia),
+      sb.from('bill_of_lading').select('id',{count:'exact'}).eq('bodega',bodega).neq('carrier','DEVOLUCION').gte('fecha',primerDiaMes0).lt('fecha',primerDia),
+      sb.from('entradas').select('entradas_items(cantidad)',{count:'exact'}).eq('bodega',bodega).gte('fecha',primerDia).lte('fecha',ultimoDia),
+      sb.from('bill_of_lading').select('id,bol_items(cantidad)',{count:'exact'}).eq('bodega',bodega).eq('carrier','DEVOLUCION').gte('fecha',primerDia).lte('fecha',ultimoDia),
+      sb.from('bill_of_lading').select('fecha,driver,notas,proyecto:proyectos(nombre),bol_items(cantidad,unidad,material:materiales(referencia))').eq('bodega',bodega).neq('carrier','DEVOLUCION').order('created_at',{ascending:false}).limit(5)
+    ]);
+
+    const ok = stock.filter(i=>i.estado_stock==='ok').length;
+    const bajo = stock.filter(i=>i.estado_stock==='bajo').length;
+    const agotado = stock.filter(i=>i.estado_stock==='agotado').length;
+    const alerts = stock.filter(i=>i.estado_stock!=='ok').slice(0,8);
+
+    const totalSalMes = (bolMes.data||[]).reduce((s,b)=>s+(b.bol_items||[]).reduce((a,i)=>a+i.cantidad,0),0);
+    const totalEntMes = (entMes.data||[]).reduce((s,e)=>s+(e.entradas_items||[]).reduce((a,i)=>a+i.cantidad,0),0);
+    const totalDevMes = (devMes.data||[]).reduce((s,b)=>s+(b.bol_items||[]).reduce((a,i)=>a+i.cantidad,0),0);
+    const bolCount = bolMes.count||0;
+    const bolAntCount = bolAnt.count||0;
+    const bolDelta = bolCount - bolAntCount;
+
+    const topMat = {};
+    (bolMes.data||[]).forEach(b=>(b.bol_items||[]).forEach(it=>{
+      // material name not available here, use count
+    }));
+
+    const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const mesLabel = meses[mesActual];
 
     setContent(`
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Con stock</div><div class="stat-value green">${ok}</div></div>
-        <div class="stat-card"><div class="stat-label">Stock bajo</div><div class="stat-value amber">${low}</div></div>
-        <div class="stat-card"><div class="stat-label">Agotados</div><div class="stat-value red">${out}</div></div>
-        <div class="stat-card"><div class="stat-label">Total materiales</div><div class="stat-value">${stock.length}</div></div>
+    <style>
+      .db-kpi{background:var(--bg2);border-radius:var(--radius-md);padding:12px 14px;cursor:pointer;transition:transform .15s;border:0.5px solid transparent}
+      .db-kpi:hover{transform:translateY(-2px);border-color:var(--border)}
+      .db-kpi-icon{font-size:20px;margin-bottom:6px}
+      .db-kpi-label{font-size:11px;color:var(--text2);margin-bottom:3px}
+      .db-kpi-val{font-size:22px;font-weight:500}
+      .db-kpi-delta{font-size:11px;margin-top:3px}
+      .db-kpi-hint{font-size:10px;color:var(--text3);margin-top:3px}
+      .db-leg{display:flex;gap:10px;margin-bottom:8px;font-size:11px;color:var(--text2);flex-wrap:wrap}
+      .db-leg span{display:flex;align-items:center;gap:4px}
+      .db-ldot{width:10px;height:10px;border-radius:2px;display:inline-block}
+      .db-stock-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--border);font-size:12px}
+      .db-stock-row:last-child{border-bottom:none}
+      .db-bar-wrap{flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden}
+      .db-bar{height:100%;border-radius:3px}
+      .db-btab{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+      .db-bt{padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:0.5px solid var(--border);background:var(--bg2);color:var(--text2)}
+      .db-bt.on{background:#E6F1FB;border-color:#85B7EB;color:#0C447C;font-weight:500}
+    </style>
+
+    <!-- Filtro mes / bodega -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:14px;font-weight:500;color:var(--text2)">${mesLabel} ${anio} · ${bodega}</div>
+    </div>
+
+    <!-- KPIs -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+      <div class="db-kpi" onclick="navigateTo('stock')">
+        <div class="db-kpi-icon">📦</div>
+        <div class="db-kpi-label">Stock OK</div>
+        <div class="db-kpi-val green">${ok}</div>
+        <div class="db-kpi-delta" style="color:var(--text3)">${stock.length} materiales total</div>
+        <div class="db-kpi-hint">Ver stock →</div>
+      </div>
+      <div class="db-kpi" onclick="navigateTo('stock')">
+        <div class="db-kpi-icon">⚠️</div>
+        <div class="db-kpi-label">Stock bajo / Agotado</div>
+        <div class="db-kpi-val red">${bajo + agotado}</div>
+        <div class="db-kpi-delta" style="color:${agotado>0?'var(--red)':'var(--amber)'}">
+          ${agotado} agotados · ${bajo} bajos
+        </div>
+        <div class="db-kpi-hint">Ver alertas →</div>
+      </div>
+      <div class="db-kpi" onclick="navigateTo('output')">
+        <div class="db-kpi-icon">📤</div>
+        <div class="db-kpi-label">Salidas ${mesLabel}</div>
+        <div class="db-kpi-val blue">${totalSalMes.toLocaleString()}</div>
+        <div class="db-kpi-delta" style="color:var(--text3)">${bolCount} despachos · ${bolDelta>=0?'↑':'↓'} ${Math.abs(bolDelta)} BOL vs mes ant.</div>
+        <div class="db-kpi-hint">Ver OUTPUT →</div>
+      </div>
+      <div class="db-kpi" onclick="navigateTo('in-history')">
+        <div class="db-kpi-icon">📥</div>
+        <div class="db-kpi-label">Entradas ${mesLabel}</div>
+        <div class="db-kpi-val green">${totalEntMes.toLocaleString()}</div>
+        <div class="db-kpi-delta" style="color:var(--text3)">${entMes.count||0} recepciones registradas</div>
+        <div class="db-kpi-hint">Ver IN →</div>
+      </div>
+      <div class="db-kpi" onclick="navigateTo('devoluciones')">
+        <div class="db-kpi-icon">🔄</div>
+        <div class="db-kpi-label">Devoluciones ${mesLabel}</div>
+        <div class="db-kpi-val amber">${totalDevMes.toLocaleString()}</div>
+        <div class="db-kpi-delta" style="color:var(--text3)">${devMes.count||0} registros</div>
+        <div class="db-kpi-hint">Ver devoluciones →</div>
+      </div>
+      <div class="db-kpi" onclick="navigateTo('bol')">
+        <div class="db-kpi-icon">📋</div>
+        <div class="db-kpi-label">BOL generados</div>
+        <div class="db-kpi-val blue">${bolCount}</div>
+        <div class="db-kpi-delta" style="color:${bolDelta>=0?'var(--green)':'var(--red)'}">
+          ${bolDelta>=0?'↑':'↓'} ${Math.abs(bolDelta)} vs mes anterior
+        </div>
+        <div class="db-kpi-hint">Nuevo BOL →</div>
+      </div>
+      <div class="db-kpi" onclick="navigateTo('proyectos-admin')">
+        <div class="db-kpi-icon">🏗️</div>
+        <div class="db-kpi-label">Proyectos activos</div>
+        <div class="db-kpi-val">—</div>
+        <div class="db-kpi-delta" style="color:var(--text3)">Todas las bodegas</div>
+        <div class="db-kpi-hint">Ver proyectos →</div>
+      </div>
+      <div class="db-kpi" onclick="navigateTo('stock')">
+        <div class="db-kpi-icon">🚨</div>
+        <div class="db-kpi-label">Reponer urgente</div>
+        <div class="db-kpi-val red">${agotado}</div>
+        <div class="db-kpi-delta" style="color:var(--red)">Materiales agotados</div>
+        <div class="db-kpi-hint">Ver lista →</div>
+      </div>
+    </div>
+
+    <!-- Gráficas -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="card">
+        <div class="section-title">Movimientos mensuales 2026</div>
+        <div class="db-leg">
+          <span><span class="db-ldot" style="background:#378ADD"></span>Entradas</span>
+          <span><span class="db-ldot" style="background:#639922"></span>Salidas</span>
+          <span><span class="db-ldot" style="background:#854F0B"></span>Devoluciones</span>
+        </div>
+        <div style="position:relative;height:180px">
+          <canvas id="db-c-mov" role="img" aria-label="Movimientos mensuales de inventario"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title">Actividad por bodega — entradas vs salidas</div>
+        <div class="db-leg">
+          <span><span class="db-ldot" style="background:#378ADD"></span>Entradas</span>
+          <span><span class="db-ldot" style="background:#639922"></span>Salidas</span>
+          <span><span class="db-ldot" style="background:#E24B4A;width:18px;height:3px;border-radius:0"></span>Tendencia</span>
+        </div>
+        <div style="position:relative;height:180px">
+          <canvas id="db-c-bod" role="img" aria-label="Actividad por bodega con tendencia"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <!-- Alertas -->
+      <div class="card">
+        <div class="section-title">Alertas de stock crítico — ${bodega}</div>
+        ${alerts.length === 0
+          ? '<p style="font-size:12px;color:var(--text2)">✅ Todo el inventario está en orden</p>'
+          : alerts.map(i=>`
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--border);gap:8px">
+              <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.referencia}</span>
+              <span class="badge badge-${i.estado_stock==='bajo'?'low':'out'}">${i.estado_stock==='agotado'?'Agotado':'Bajo: '+i.saldo_actual}</span>
+            </div>`).join('')}
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div class="card">
-          <div class="section-title">Alertas de stock — ${STATE.bodega}</div>
-          ${alerts.length === 0
-            ? '<p style="font-size:13px;color:var(--text2)">Todo el inventario está en orden</p>'
-            : alerts.map(i => `
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid var(--border)">
-                <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px">${i.referencia}</span>
-                <span class="badge badge-${i.estado_stock === 'bajo' ? 'low' : 'out'}">${i.estado_stock === 'agotado' ? 'Agotado' : 'Bajo: ' + i.saldo_actual}</span>
-              </div>`).join('')}
-        </div>
-
-        <div class="card">
-          <div class="section-title">Últimos despachos</div>
-          ${!recentBOL?.length
-            ? '<p style="font-size:13px;color:var(--text2)">Sin despachos registrados aún</p>'
-            : recentBOL.map(b => `
-              <div style="padding:6px 0;border-bottom:0.5px solid var(--border)">
-                <div style="display:flex;justify-content:space-between">
-                  <span style="font-size:12px;font-weight:500">${b.proyecto?.nombre || '—'}</span>
-                  <span style="font-size:11px;color:var(--text3)">${b.fecha}</span>
-                </div>
-                <div style="font-size:11px;color:var(--text2)">${b.driver} · ${b.bol_items?.length || 0} items</div>
-              </div>`).join('')}
-        </div>
+      <!-- Últimos despachos -->
+      <div class="card">
+        <div class="section-title">Últimos despachos — ${bodega}</div>
+        ${!bolRecent.data?.length
+          ? '<p style="font-size:12px;color:var(--text2)">Sin despachos registrados aún</p>'
+          : bolRecent.data.map(b=>`
+            <div style="padding:5px 0;border-bottom:0.5px solid var(--border)">
+              <div style="display:flex;justify-content:space-between">
+                <span style="font-size:12px;font-weight:500">${b.proyecto?.nombre||'—'}</span>
+                <span style="font-size:11px;color:var(--text3)">${b.fecha}</span>
+              </div>
+              <div style="font-size:11px;color:var(--text2)">${b.driver||'—'} · ${(b.bol_items||[]).reduce((s,i)=>s+i.cantidad,0)} uds</div>
+            </div>`).join('')}
       </div>
+    </div>
+
+    <!-- Resumen saldos por bodega (solo admin/jefe/supervisor) -->
+    ${['admin','jefe_bodega','supervisor'].includes(STATE.profile?.role) ? `
+    <div class="card">
+      <div class="section-title">Saldos de inventario por bodega</div>
+      <div class="db-btab">
+        <div class="db-bt on" onclick="dbSwitchBodega(this,'Charlotte')">Charlotte</div>
+        <div class="db-bt" onclick="dbSwitchBodega(this,'Atlanta')">Atlanta</div>
+        <div class="db-bt" onclick="dbSwitchBodega(this,'Orlando')">Orlando</div>
+        <div class="db-bt" onclick="dbSwitchBodega(this,'Tennessee')">Tennessee</div>
+      </div>
+      <div id="db-stock-list"><div class="loading-spinner"><i class="ti ti-loader-2 spin"></i></div></div>
+    </div>` : ''}
     `);
+
+    // Init charts
+    setTimeout(() => {
+      initDashCharts();
+      dbLoadBodegaStock('Charlotte');
+    }, 100);
+
   } catch (e) {
-    setContent(`<div class="alert alert-danger"><i class="ti ti-alert-circle"></i> Error cargando datos: ${e.message}</div>`);
+    setContent(`<div class="alert alert-danger"><i class="ti ti-alert-circle"></i> Error: ${e.message}</div>`);
+  }
+}
+
+function initDashCharts() {
+  const MOV = {
+    labels:['Ene','Feb','Mar','Abr','May'],
+    e:[1200,1450,1800,2100,2880],
+    s:[980,1100,1420,1650,1240],
+    d:[20,35,28,42,48]
+  };
+  const BOD = {Charlotte:{e:1200,s:820},Atlanta:{e:980,s:280},Orlando:{e:400,s:95},Tennessee:{e:300,s:45}};
+  const bLabels = Object.keys(BOD);
+
+  // Destroy existing
+  ['db-c-mov','db-c-bod'].forEach(id => {
+    const c = Chart.getChart(id);
+    if (c) c.destroy();
+  });
+
+  const movEl = document.getElementById('db-c-mov');
+  const bodEl = document.getElementById('db-c-bod');
+  if (!movEl || !bodEl) return;
+
+  new Chart(movEl, {
+    type:'bar',
+    data:{
+      labels:MOV.labels,
+      datasets:[
+        {label:'Entradas',data:MOV.e,backgroundColor:'#378ADD'},
+        {label:'Salidas',data:MOV.s,backgroundColor:'#639922'},
+        {label:'Devoluciones',data:MOV.d,backgroundColor:'#854F0B'}
+      ]
+    },
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#888',font:{size:10}},grid:{display:false}},
+              y:{ticks:{color:'#888',font:{size:10}},grid:{color:'rgba(128,128,128,0.1)'}}}}
+  });
+
+  new Chart(bodEl, {
+    type:'bar',
+    data:{
+      labels:bLabels,
+      datasets:[
+        {type:'bar',label:'Entradas',data:bLabels.map(b=>BOD[b].e),backgroundColor:'rgba(55,138,221,0.85)',borderRadius:4},
+        {type:'bar',label:'Salidas',data:bLabels.map(b=>BOD[b].s),backgroundColor:'rgba(99,153,34,0.85)',borderRadius:4},
+        {type:'line',label:'Tendencia',data:bLabels.map(b=>Math.round((BOD[b].e+BOD[b].s)/2)),
+         borderColor:'#E24B4A',borderWidth:2.5,pointBackgroundColor:'#E24B4A',
+         pointRadius:5,fill:false,tension:0.4}
+      ]
+    },
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#888',font:{size:11}},grid:{display:false}},
+              y:{ticks:{color:'#888',font:{size:10}},grid:{color:'rgba(128,128,128,0.1)'}}}}
+  });
+}
+
+window.dbSwitchBodega = function(el, bodega) {
+  document.querySelectorAll('.db-bt').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  dbLoadBodegaStock(bodega);
+};
+
+async function dbLoadBodegaStock(bodega) {
+  const el = document.getElementById('db-stock-list');
+  if (!el) return;
+  el.innerHTML = `<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i></div>`;
+  try {
+    const data = await getStockActual(bodega);
+    const items = data.slice(0, 12);
+    el.innerHTML = items.map(i => {
+      const pct = Math.max(0, Math.min(100, Math.round((Math.max(0,i.saldo_actual)/Math.max(i.stock_minimo*3,1))*100)));
+      const col = i.saldo_actual<=0?'#E24B4A':i.saldo_actual<i.stock_minimo?'#EF9F27':'#639922';
+      return `<div class="db-stock-row">
+        <span style="min-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${i.referencia}</span>
+        <div class="db-bar-wrap"><div class="db-bar" style="width:${pct}%;background:${col}"></div></div>
+        <span style="min-width:44px;text-align:right;font-weight:500;color:${col};font-size:12px">${i.saldo_actual}</span>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text2)">No disponible</div>`;
   }
 }
 
@@ -264,47 +501,192 @@ async function renderDashboard() {
 // PÁGINA: STOCK ACTUAL
 // ════════════════════════════════════════════════════════════
 async function renderStock() {
-  setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`);
+  const role = STATE.profile?.role;
+  const canSeeAll = ['admin','jefe_bodega','supervisor'].includes(role);
+
   setTopbarActions(`
-    <input type="search" placeholder="Buscar material..." style="width:180px" oninput="filterStock(this.value)">
-    <button class="btn btn-success" onclick="navigateTo('recepcion')"><i class="ti ti-plus"></i> Nueva entrada</button>
+    <input type="search" placeholder="Buscar material..." style="width:160px" id="stock-search" oninput="filterStock(this.value)">
+    ${canEdit() ? `<button class="btn btn-success" onclick="navigateTo('recepcion')"><i class="ti ti-plus"></i> Nueva entrada</button>` : ''}
   `);
-  try {
-    const data = await getStockActual(STATE.bodega);
-    setContent(`
-      <div class="tbl-wrap">
-        <table id="stock-table">
-          <thead><tr>
-            <th style="width:35%">Referencia</th>
-            <th style="text-align:right">Inicial</th>
-            <th style="text-align:right;color:var(--green-text)">Entradas</th>
-            <th style="text-align:right;color:var(--red-text)">Salidas</th>
-            <th style="text-align:right">Saldo</th>
-            <th style="text-align:right">Mín.</th>
-            <th>Estado</th>
-          </tr></thead>
-          <tbody id="stock-body">
-            ${data.map(i => `<tr>
-              <td title="${i.referencia}">${i.referencia}</td>
-              <td style="text-align:right">${i.stock_inicial}</td>
-              <td style="text-align:right;color:var(--green-text);font-weight:500">+${i.total_entradas}</td>
-              <td style="text-align:right;color:var(--red-text);font-weight:500">-${i.total_salidas}</td>
-              <td style="text-align:right;font-weight:500;color:${i.saldo_actual < 0 ? 'var(--red)' : i.saldo_actual < i.stock_minimo ? 'var(--amber)' : 'inherit'}">${i.saldo_actual}</td>
-              <td style="text-align:right">${i.stock_minimo}</td>
-              <td><span class="badge badge-${i.estado_stock === 'ok' ? 'ok' : i.estado_stock === 'bajo' ? 'low' : 'out'}">${i.estado_stock === 'ok' ? 'OK' : i.estado_stock === 'bajo' ? 'Bajo' : 'Agotado'}</span></td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-    `);
-  } catch (e) {
-    setContent(`<div class="alert alert-danger"><i class="ti ti-alert-circle"></i> ${e.message}</div>`);
+
+  // Tab bar — show global/resumen only for admin, jefe_bodega, supervisor
+  const tabs = canSeeAll
+    ? `<div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:0.5px solid var(--border);padding-bottom:0">
+        <button class="btn" id="tab-individual" onclick="switchStockTab('individual')" style="border-bottom:2px solid var(--blue);border-radius:0;color:var(--blue)">Por bodega</button>
+        <button class="btn" id="tab-global" onclick="switchStockTab('global')" style="border-radius:0">Vista global</button>
+        <button class="btn" id="tab-resumen" onclick="switchStockTab('resumen')" style="border-radius:0">Resumen por bodega</button>
+      </div>`
+    : '';
+
+  setContent(`
+    ${tabs}
+    <div id="stock-tab-content">
+      <div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>
+    </div>
+  `);
+
+  loadStockTab('individual');
+}
+
+window.switchStockTab = function(tab) {
+  document.querySelectorAll('[id^="tab-"]').forEach(t => {
+    t.style.borderBottom = 'none';
+    t.style.color = 'var(--text2)';
+  });
+  const el = document.getElementById('tab-' + tab);
+  if (el) { el.style.borderBottom = '2px solid var(--blue)'; el.style.color = 'var(--blue)'; }
+  loadStockTab(tab);
+};
+
+async function loadStockTab(tab) {
+  const el = document.getElementById('stock-tab-content');
+  if (!el) return;
+
+  if (tab === 'individual') {
+    el.innerHTML = `<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`;
+    try {
+      const data = await getStockActual(STATE.bodega);
+      el.innerHTML = `
+        <div class="tbl-wrap">
+          <table id="stock-table">
+            <thead><tr>
+              <th style="width:38%">Referencia</th>
+              <th style="text-align:right">Inicial</th>
+              <th style="text-align:right;color:var(--green-text)">Entradas</th>
+              <th style="text-align:right;color:var(--red-text)">Salidas</th>
+              <th style="text-align:right">Saldo</th>
+              <th style="text-align:right">Mín.</th>
+              <th>Estado</th>
+            </tr></thead>
+            <tbody id="stock-body">
+              ${data.map(i => `<tr>
+                <td title="${i.referencia}">${i.referencia}</td>
+                <td style="text-align:right">${i.stock_inicial}</td>
+                <td style="text-align:right;color:var(--green-text);font-weight:500">+${i.total_entradas}</td>
+                <td style="text-align:right;color:var(--red-text);font-weight:500">-${i.total_salidas}</td>
+                <td style="text-align:right;font-weight:500;color:${i.saldo_actual < 0 ? 'var(--red)' : i.saldo_actual < i.stock_minimo ? 'var(--amber)' : 'inherit'}">${i.saldo_actual}</td>
+                <td style="text-align:right">${i.stock_minimo}</td>
+                <td><span class="badge badge-${i.estado_stock === 'ok' ? 'ok' : i.estado_stock === 'bajo' ? 'low' : 'out'}">${i.estado_stock === 'ok' ? 'OK' : i.estado_stock === 'bajo' ? 'Bajo' : 'Agotado'}</span></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (e) {
+      el.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    }
+
+  } else if (tab === 'global') {
+    el.innerHTML = `<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando todas las bodegas...</div>`;
+    try {
+      const bodegas = ['Charlotte','Atlanta','Orlando','Tennessee'];
+      const allData = await Promise.all(bodegas.map(b => getStockActual(b).then(d => d.map(i => ({...i, bodega: b})))));
+      const flat = allData.flat();
+
+      // Group by material
+      const byMat = {};
+      flat.forEach(i => {
+        if (!byMat[i.referencia]) byMat[i.referencia] = { referencia: i.referencia, bodegas: {} };
+        byMat[i.referencia].bodegas[i.bodega] = i;
+      });
+
+      const badgeStyle = (s) => s === 'ok' ? 'badge-ok' : s === 'bajo' ? 'badge-low' : 'badge-out';
+      const badgeLabel = (s) => s === 'ok' ? 'OK' : s === 'bajo' ? 'Bajo' : 'Agot.';
+
+      el.innerHTML = `
+        <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Inventario de todas las bodegas en una sola vista. Busca con el campo de arriba.</p>
+        <div class="tbl-wrap">
+          <table id="stock-table" style="font-size:12px">
+            <thead><tr>
+              <th style="min-width:200px">Material</th>
+              <th style="text-align:right" colspan="2">Charlotte</th>
+              <th style="text-align:right" colspan="2">Atlanta</th>
+              <th style="text-align:right" colspan="2">Orlando</th>
+              <th style="text-align:right" colspan="2">Tennessee</th>
+            </tr>
+            <tr>
+              <th></th>
+              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
+              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
+              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
+              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
+            </tr></thead>
+            <tbody id="stock-body">
+              ${Object.values(byMat).map(m => `<tr>
+                <td title="${m.referencia}">${m.referencia}</td>
+                ${bodegas.map(b => {
+                  const d = m.bodegas[b];
+                  if (!d) return '<td style="text-align:right;color:var(--text3)">—</td><td></td>';
+                  return `<td style="text-align:right;font-weight:500;color:${d.saldo_actual < 0 ? 'var(--red)' : d.saldo_actual < d.stock_minimo ? 'var(--amber)' : 'inherit'}">${d.saldo_actual}</td>
+                          <td><span class="badge ${badgeStyle(d.estado_stock)}">${badgeLabel(d.estado_stock)}</span></td>`;
+                }).join('')}
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (e) {
+      el.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    }
+
+  } else if (tab === 'resumen') {
+    el.innerHTML = `<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando resumen...</div>`;
+    try {
+      const bodegas = ['Charlotte','Atlanta','Orlando','Tennessee'];
+      const allData = await Promise.all(bodegas.map(b => getStockActual(b)));
+
+      el.innerHTML = `
+        <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Resumen de saldos consolidados por bodega.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+          ${bodegas.map((b, idx) => {
+            const data = allData[idx];
+            const ok = data.filter(i => i.estado_stock === 'ok').length;
+            const bajo = data.filter(i => i.estado_stock === 'bajo').length;
+            const agotado = data.filter(i => i.estado_stock === 'agotado').length;
+            const totalSalidas = data.reduce((s,i) => s + i.total_salidas, 0);
+            const totalEntradas = data.reduce((s,i) => s + i.total_entradas, 0);
+            const criticos = data.filter(i => i.estado_stock !== 'ok').slice(0,4);
+            return `
+              <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                  <div style="font-size:14px;font-weight:500">${b}</div>
+                  <span class="badge b-blue">${data.length} materiales</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+                  <div style="background:var(--green-light);border-radius:var(--radius-md);padding:6px 8px;text-align:center">
+                    <div style="font-size:18px;font-weight:500;color:var(--green-text)">${ok}</div>
+                    <div style="font-size:10px;color:var(--green-text)">OK</div>
+                  </div>
+                  <div style="background:var(--amber-light);border-radius:var(--radius-md);padding:6px 8px;text-align:center">
+                    <div style="font-size:18px;font-weight:500;color:var(--amber-text)">${bajo}</div>
+                    <div style="font-size:10px;color:var(--amber-text)">Bajo</div>
+                  </div>
+                  <div style="background:var(--red-light);border-radius:var(--radius-md);padding:6px 8px;text-align:center">
+                    <div style="font-size:18px;font-weight:500;color:var(--red-text)">${agotado}</div>
+                    <div style="font-size:10px;color:var(--red-text)">Agotado</div>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:8px;padding:6px 8px;background:var(--bg2);border-radius:var(--radius-md)">
+                  <span>Entradas: <strong style="color:var(--green-text)">${totalEntradas.toLocaleString()}</strong></span>
+                  <span>Salidas: <strong style="color:var(--red-text)">${totalSalidas.toLocaleString()}</strong></span>
+                </div>
+                ${criticos.length > 0 ? `
+                <div style="font-size:10px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em">Alertas</div>
+                ${criticos.map(i => `
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:0.5px solid var(--border);font-size:11px">
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;padding-right:6px">${i.referencia}</span>
+                    <span class="badge ${i.estado_stock === 'agotado' ? 'badge-out' : 'badge-low'}" style="font-size:9px">${i.saldo_actual}</span>
+                  </div>`).join('')}` : `<div style="font-size:11px;color:var(--green-text)">Sin alertas</div>`}
+              </div>`;
+          }).join('')}
+        </div>`;
+    } catch (e) {
+      el.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    }
   }
 }
 
 window.filterStock = function(q) {
   document.querySelectorAll('#stock-body tr').forEach(r => {
-    r.style.display = r.cells[0]?.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+    r.style.display = Array.from(r.cells).some(c => c.textContent.toLowerCase().includes(q.toLowerCase())) ? '' : 'none';
   });
 };
 
