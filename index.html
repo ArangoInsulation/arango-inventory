@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arango Insulation — Inventario</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Pantalla de login -->
+  <div id="login-screen" class="login-wrap">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="logo-icon"><i class="ti ti-building-warehouse"></i></div>
+        <h1>Arango Insulation</h1>
+        <p>Sistema de inventario</p>
+      </div>
+      <div id="login-error" class="alert alert-danger hidden"></div>
+      <div class="field">
+        <label>Correo electrónico</label>
+        <input type="email" id="login-email" placeholder="usuario@arangoinsulation.com" autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Contraseña</label>
+        <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary btn-full" id="login-btn" onclick="handleLogin()">
+        <i class="ti ti-login"></i> Iniciar sesión
+      </button>
+      <p class="login-footer">¿Problemas para entrar? Contacta al administrador.</p>
+    </div>
+  </div>
+
+  <!-- App principal -->
+  <div id="app-screen" class="app hidden">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <i class="ti ti-building-warehouse sidebar-logo-icon"></i>
+          <div>
+            <div class="sidebar-title">Arango</div>
+            <div class="sidebar-sub">Inventario</div>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section">Principal</div>
+        <a class="nav-item active" data-page="dashboard">
+          <i class="ti ti-layout-dashboard"></i> Dashboard
+        </a>
+        <a class="nav-item" data-page="bol" data-roles="admin,jefe_bodega,bodeguero">
+          <i class="ti ti-file-text"></i> Bill of Lading
+        </a>
+
+        <div class="nav-section">Inventario</div>
+        <a class="nav-item" data-page="recepcion" data-roles="admin,jefe_bodega,bodeguero">
+          <i class="ti ti-arrow-down-left"></i> Recepción IN
+        </a>
+        <a class="nav-item" data-page="stock">
+          <i class="ti ti-package"></i> Stock actual
+        </a>
+
+        <div class="nav-section">Historial</div>
+        <a class="nav-item" data-page="output">
+          <i class="ti ti-arrow-up-right"></i> OUTPUT — Salidas
+        </a>
+        <a class="nav-item" data-page="in-history">
+          <i class="ti ti-archive"></i> IN — Entradas
+        </a>
+
+        <div class="nav-section" data-roles="admin">Admin</div>
+        <a class="nav-item" data-page="usuarios" data-roles="admin">
+          <i class="ti ti-users"></i> Usuarios
+        </a>
+        <a class="nav-item" data-page="materiales-admin" data-roles="admin">
+          <i class="ti ti-list"></i> Materiales
+        </a>
+        <a class="nav-item" data-page="proyectos-admin" data-roles="admin">
+          <i class="ti ti-building"></i> Proyectos
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <!-- Selector de bodega -->
+        <div class="bodega-selector">
+          <div class="bodega-tag" id="tag-Charlotte" onclick="setBodega('Charlotte')">Charlotte</div>
+          <div class="bodega-tag" id="tag-Atlanta" onclick="setBodega('Atlanta')">Atlanta</div>
+          <div class="bodega-tag" id="tag-Orlando" onclick="setBodega('Orlando')">Orlando</div>
+          <div class="bodega-tag" id="tag-Tennessee" onclick="setBodega('Tennessee')">Tennessee</div>
+        </div>
+        <div class="sidebar-user" id="sidebar-user">
+          <div class="user-avatar" id="user-avatar">?</div>
+          <div class="user-info">
+            <div class="user-name" id="user-name">Cargando...</div>
+            <div class="user-role" id="user-role"></div>
+          </div>
+          <button class="btn-icon" onclick="handleLogout()" title="Cerrar sesión">
+            <i class="ti ti-logout"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Contenido principal -->
+    <div class="main-content">
+      <header class="topbar">
+        <button class="btn-icon mobile-menu-btn" onclick="toggleSidebar()">
+          <i class="ti ti-menu-2"></i>
+        </button>
+        <h1 class="page-title" id="page-title">Dashboard</h1>
+        <div class="topbar-actions" id="topbar-actions"></div>
+      </header>
+      <div class="page-content" id="page-content">
+        <div class="loading-spinner">
+          <i class="ti ti-loader-2 spin"></i> Cargando...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notificación toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
