@@ -6,7 +6,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // ── Config Supabase ─────────────────────────────────────────
 const SUPABASE_URL = 'https://elybdaocjkepznfzusdz.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk'; const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk';
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Estado global ───────────────────────────────────────────
 let STATE = {
@@ -149,10 +150,11 @@ window.navigateTo = function(page) {
     usuarios: 'Gestión de usuarios',
     'materiales-admin': 'Catálogo de materiales',
     'proyectos-admin': 'Proyectos',
+    'devoluciones': 'Devoluciones de material',
   };
   document.getElementById('page-title').textContent = titles[page] || page;
   document.getElementById('topbar-actions').innerHTML = '';
-  const pages = { dashboard: renderDashboard, bol: renderBOL, recepcion: renderRecepcion, stock: renderStock, output: renderOutput, 'in-history': renderInHistory, usuarios: renderUsuarios, 'materiales-admin': renderMaterialesAdmin, 'proyectos-admin': renderProyectosAdmin };
+  const pages = { dashboard: renderDashboard, bol: renderBOL, recepcion: renderRecepcion, stock: renderStock, output: renderOutput, 'in-history': renderInHistory, usuarios: renderUsuarios, 'materiales-admin': renderMaterialesAdmin, 'proyectos-admin': renderProyectosAdmin, devoluciones: renderDevoluciones };
   (pages[page] || renderDashboard)();
 };
 
@@ -857,7 +859,7 @@ async function renderOutput() {
     setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`);
     const { data, count } = await sb.from('bill_of_lading')
       .select(`
-        fecha, wo_number, tracking, driver, notas, created_at,
+        id, fecha, wo_number, tracking, driver, notas, created_at,
         registrado_por:profiles!registrado_por(full_name),
         proyecto:proyectos(nombre, ciudad, estado, compania, pm_nombre, direccion),
         bol_items(cantidad, unidad, es_devolucion, material:materiales(referencia))
@@ -867,9 +869,11 @@ async function renderOutput() {
       .range(page * PG, (page + 1) * PG - 1);
 
     const rows = [];
+    const shownBolIds = new Set();
     (data || []).forEach(b => {
       (b.bol_items || []).forEach(it => {
         rows.push({
+          bol_id: b.id,
           fecha: b.fecha,
           wo: b.wo_number || '—',
           proyecto: b.proyecto?.nombre || '—',
@@ -889,7 +893,6 @@ async function renderOutput() {
       });
     });
 
-    // Store for export
     window._outputRows = rows;
 
     setContent(`
@@ -917,25 +920,34 @@ async function renderOutput() {
             <th style="min-width:130px">Driver / Installer</th>
             <th style="min-width:120px">Registrado por</th>
             <th>Devolución</th>
+            <th>Editar WO</th>
           </tr></thead>
           <tbody id="output-body">
-            ${rows.map(r=>`<tr>
-              <td>${r.fecha}</td>
-              <td>${r.wo}</td>
-              <td title="${r.proyecto}">${r.proyecto}</td>
-              <td title="${r.pm}">${r.pm}</td>
-              <td title="${r.compania}">${r.compania}</td>
-              <td>${r.estado}</td>
-              <td>${r.ciudad}</td>
-              <td style="text-align:right;font-weight:500">${r.qty}</td>
-              <td>${r.um}</td>
-              <td title="${r.mat}">${r.mat}</td>
-              <td>${r.pro}</td>
-              <td>${r.tracking}</td>
-              <td title="${r.driver}">${r.driver}</td>
-              <td title="${r.registrado}">${r.registrado}</td>
-              <td>${r.devolucion}</td>
-            </tr>`).join('')}
+            ${(() => {
+              const shown = new Set();
+              return rows.map(r => {
+                const showEdit = !shown.has(r.bol_id);
+                if (showEdit) shown.add(r.bol_id);
+                return `<tr>
+                  <td>${r.fecha}</td>
+                  <td style="font-weight:500">${r.wo}</td>
+                  <td title="${r.proyecto}">${r.proyecto}</td>
+                  <td title="${r.pm}">${r.pm}</td>
+                  <td title="${r.compania}">${r.compania}</td>
+                  <td>${r.estado}</td>
+                  <td>${r.ciudad}</td>
+                  <td style="text-align:right;font-weight:500">${r.qty}</td>
+                  <td>${r.um}</td>
+                  <td title="${r.mat}">${r.mat}</td>
+                  <td>${r.pro}</td>
+                  <td>${r.tracking}</td>
+                  <td title="${r.driver}">${r.driver}</td>
+                  <td title="${r.registrado}">${r.registrado}</td>
+                  <td>${r.devolucion}</td>
+                  <td>${showEdit ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditWO('${r.bol_id}','${r.wo === '—' ? '' : r.wo}')"><i class="ti ti-edit"></i></button>` : ''}</td>
+                </tr>`;
+              }).join('');
+            })()}
           </tbody>
         </table>
       </div>
@@ -948,6 +960,36 @@ async function renderOutput() {
   }
   load();
 }
+
+window.showEditWO = function(bolId, wo) {
+  document.getElementById('edit-wo-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'edit-wo-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div style="background:var(--bg);border-radius:var(--radius-lg);padding:24px;max-width:380px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,0.2)">
+      <div style="font-size:15px;font-weight:500;margin-bottom:16px">Editar WO #</div>
+      <div class="field">
+        <label>WO Number</label>
+        <input type="text" id="edit-wo-input" value="${wo}" placeholder="ej. 3073180">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary" onclick="saveEditWO('${bolId}')"><i class="ti ti-device-floppy"></i> Guardar</button>
+        <button class="btn" onclick="document.getElementById('edit-wo-modal').remove()">Cancelar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('edit-wo-input').focus();
+};
+
+window.saveEditWO = async function(bolId) {
+  const wo = document.getElementById('edit-wo-input').value.trim();
+  const { error } = await sb.from('bill_of_lading').update({ wo_number: wo || null }).eq('id', bolId);
+  if (error) { toast(error.message, 'error'); return; }
+  document.getElementById('edit-wo-modal').remove();
+  toast('WO actualizado correctamente');
+  navigateTo('output');
+};
 
 window.exportOutputExcel = function() {
   const rows = window._outputRows || [];
@@ -1002,7 +1044,7 @@ window.loadInHistory = async function() {
   setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`);
 
   let query = sb.from('entradas')
-    .select(`fecha, po_number, supplier, status, tracking, observaciones, registrado_por:profiles!registrado_por(full_name), entradas_items(cantidad, unidad, material:materiales(referencia))`)
+    .select(`id, fecha, po_number, supplier, status, tracking, observaciones, registrado_por:profiles!registrado_por(full_name), entradas_items(cantidad, unidad, material:materiales(referencia))`)
     .eq('bodega', STATE.bodega)
     .order('fecha', { ascending: false });
 
@@ -1015,6 +1057,7 @@ window.loadInHistory = async function() {
   (data || []).forEach(e => {
     (e.entradas_items || []).forEach(it => {
       rows.push({
+        id: e.id,
         fecha: e.fecha,
         po: e.po_number || '—',
         supplier: e.supplier,
@@ -1030,11 +1073,16 @@ window.loadInHistory = async function() {
   });
 
   window._inRows = rows;
+  // Store unique entries for editing
+  window._inEntradas = data || [];
 
   const statusBadge = s => {
     const map = { Complete: 'ok', Incomplete: 'out', Pending: 'low' };
     return `<span class="badge badge-${map[s]||'low'}">${s}</span>`;
   };
+
+  // Group rows by entry id to show edit button only once per entry
+  const shownIds = new Set();
 
   setContent(`
     <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
@@ -1053,25 +1101,71 @@ window.loadInHistory = async function() {
           <th>Fecha</th><th>PO Number</th><th>Proveedor</th><th>Estado</th>
           <th>Tracking</th><th style="text-align:right">Qty</th><th>U/M</th>
           <th style="min-width:160px">Material</th><th style="min-width:180px">Observaciones</th>
-          <th>Registrado por</th>
+          <th>Registrado por</th><th>Editar</th>
         </tr></thead>
         <tbody>
-          ${rows.map(r=>`<tr>
-            <td>${r.fecha}</td>
-            <td style="font-weight:500">${r.po}</td>
-            <td>${r.supplier}</td>
-            <td>${statusBadge(r.status)}</td>
-            <td>${r.tracking}</td>
-            <td style="text-align:right;font-weight:500;color:var(--green-text)">+${r.qty}</td>
-            <td>${r.um}</td>
-            <td title="${r.mat}">${r.mat}</td>
-            <td title="${r.obs}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.obs}</td>
-            <td>${r.registrado}</td>
-          </tr>`).join('')}
+          ${rows.map(r => {
+            const showEdit = !shownIds.has(r.id);
+            if (showEdit) shownIds.add(r.id);
+            return `<tr>
+              <td>${r.fecha}</td>
+              <td style="font-weight:500">${r.po}</td>
+              <td>${r.supplier}</td>
+              <td>${statusBadge(r.status)}</td>
+              <td>${r.tracking}</td>
+              <td style="text-align:right;font-weight:500;color:var(--green-text)">+${r.qty}</td>
+              <td>${r.um}</td>
+              <td title="${r.mat}">${r.mat}</td>
+              <td title="${r.obs}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.obs}</td>
+              <td>${r.registrado}</td>
+              <td>${showEdit ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditEntrada('${r.id}','${r.po}','${r.status}')"><i class="ti ti-edit"></i></button>` : ''}</td>
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>
     </div>`}
   `);
+};
+
+window.showEditEntrada = function(id, po, status) {
+  // Remove existing modal if any
+  document.getElementById('edit-entrada-modal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'edit-entrada-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div style="background:var(--bg);border-radius:var(--radius-lg);padding:24px;max-width:420px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,0.2)">
+      <div style="font-size:15px;font-weight:500;margin-bottom:16px">Editar entrada</div>
+      <div class="field">
+        <label>PO Number <span style="color:var(--red-text)">*</span></label>
+        <input type="text" id="edit-po" value="${po === '—' ? '' : po}" placeholder="ej. AIC-21349">
+      </div>
+      <div class="field">
+        <label>Estado</label>
+        <select id="edit-status">
+          <option value="Complete" ${status==='Complete'?'selected':''}>Complete</option>
+          <option value="Incomplete" ${status==='Incomplete'?'selected':''}>Incomplete</option>
+          <option value="Pending" ${status==='Pending'?'selected':''}>Pending</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary" onclick="saveEditEntrada('${id}')"><i class="ti ti-device-floppy"></i> Guardar</button>
+        <button class="btn" onclick="document.getElementById('edit-entrada-modal').remove()">Cancelar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+};
+
+window.saveEditEntrada = async function(id) {
+  const po = document.getElementById('edit-po').value.trim();
+  const status = document.getElementById('edit-status').value;
+  if (!po) { toast('El PO Number es obligatorio', 'error'); return; }
+  const { error } = await sb.from('entradas').update({ po_number: po, status }).eq('id', id);
+  if (error) { toast(error.message, 'error'); return; }
+  document.getElementById('edit-entrada-modal').remove();
+  toast('Entrada actualizada correctamente');
+  loadInHistory();
 };
 
 window.exportInExcel = function() {
@@ -1522,6 +1616,188 @@ window.updateProyecto = async function() {
   if (error) { toast(error.message, 'error'); return; }
   toast('Proyecto actualizado');
   renderProyectosAdmin();
+};
+
+// ════════════════════════════════════════════════════════════
+// PÁGINA: DEVOLUCIONES
+// ════════════════════════════════════════════════════════════
+let devItems = [];
+
+async function renderDevoluciones() {
+  devItems = [];
+  setTopbarActions('');
+  const materiales = await getMateriales();
+  const proyectos = await getProyectos(STATE.bodega);
+
+  setContent(`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div class="alert alert-info"><i class="ti ti-info-circle"></i> Al guardar, los materiales se suman al inventario de ${STATE.bodega}.</div>
+        <div class="card">
+          <div class="section-title">Datos de la devolución</div>
+          <div class="grid2">
+            <div class="field"><label>Fecha</label>
+              <input type="date" id="dev-fecha" value="${new Date().toISOString().slice(0,10)}">
+            </div>
+            <div class="field"><label>Proyecto</label>
+              <select id="dev-proyecto">
+                <option value="">Seleccionar...</option>
+                ${proyectos.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Driver / Installer</label>
+              <input type="text" id="dev-driver" placeholder="Nombre del instalador">
+            </div>
+            <div class="field"><label>Tracking #</label>
+              <input type="text" id="dev-tracking" placeholder="Opcional">
+            </div>
+            <div class="field" style="grid-column:1/-1"><label>Motivo de devolución <span style="color:var(--red-text)">*</span></label>
+              <select id="dev-motivo">
+                <option value="">Seleccionar motivo...</option>
+                <option value="Devolución de material sobrante">Devolución de material sobrante</option>
+                <option value="No era el material correcto">No era el material correcto</option>
+                <option value="Material en mal estado">Material en mal estado</option>
+              </select>
+            </div>
+            <div class="field" style="grid-column:1/-1"><label>Observaciones</label>
+              <textarea id="dev-obs" placeholder="Detalles adicionales..." style="width:100%;min-height:70px;padding:8px 10px;border:0.5px solid var(--border2);border-radius:var(--border-radius-md);background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Materiales a devolver</div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <select id="dev-mat" style="flex:2">
+              <option value="">Material...</option>
+              ${materiales.map(m=>`<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
+            </select>
+            <input type="number" id="dev-qty" placeholder="Qty" min="1" style="width:65px">
+            <select id="dev-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>PACK</option></select>
+            <button class="btn btn-primary" onclick="addDevItem()" style="flex:none"><i class="ti ti-plus"></i></button>
+          </div>
+          <div id="dev-items-list"></div>
+        </div>
+
+        <button class="btn btn-primary btn-full" onclick="saveDevolucion()">
+          <i class="ti ti-device-floppy"></i> Registrar devolución — suma al inventario
+        </button>
+      </div>
+
+      <div>
+        <div class="section-title">Historial de devoluciones recientes</div>
+        <div id="dev-history-list">
+          <div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  loadDevHistory();
+}
+
+window.addDevItem = function() {
+  const matEl = document.getElementById('dev-mat');
+  const matId = matEl.value;
+  const matRef = matEl.options[matEl.selectedIndex]?.dataset?.ref;
+  const qty = parseInt(document.getElementById('dev-qty').value) || 0;
+  const um = document.getElementById('dev-um').value;
+  if (!matId || qty < 1) { toast('Selecciona un material y cantidad', 'error'); return; }
+  const ex = devItems.findIndex(i => i.material_id === matId);
+  if (ex >= 0) devItems[ex].cantidad += qty;
+  else devItems.push({ material_id: matId, referencia: matRef, cantidad: qty, unidad: um });
+  matEl.value = ''; document.getElementById('dev-qty').value = '';
+  renderDevItems();
+};
+
+function renderDevItems() {
+  const el = document.getElementById('dev-items-list');
+  if (!el) return;
+  el.innerHTML = devItems.map((it, i) => `
+    <div class="item-row">
+      <div style="flex:1;font-size:12px"><span style="font-weight:500">+${it.cantidad} ${it.unidad}</span> · ${it.referencia}</div>
+      <button class="btn-icon" onclick="devItems.splice(${i},1);renderDevItems()"><i class="ti ti-x"></i></button>
+    </div>`).join('');
+}
+
+async function loadDevHistory() {
+  const el = document.getElementById('dev-history-list');
+  if (!el) return;
+  const { data } = await sb.from('bill_of_lading')
+    .select(`fecha, notas, driver, proyecto:proyectos(nombre), bol_items(cantidad, unidad, material:materiales(referencia))`)
+    .eq('bodega', STATE.bodega)
+    .eq('carrier', 'DEVOLUCION')
+    .order('fecha', { ascending: false })
+    .limit(20);
+
+  if (!data?.length) {
+    el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text2);font-size:13px">Sin devoluciones registradas aún.</div>`;
+    return;
+  }
+
+  el.innerHTML = data.map(d => `
+    <div class="card" style="margin-bottom:8px;padding:10px 14px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-weight:500;font-size:13px">${d.proyecto?.nombre || '—'}</span>
+        <span style="font-size:11px;color:var(--text3)">${d.fecha}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:4px"><span class="badge b-low">${d.notas || '—'}</span></div>
+      <div style="font-size:12px;color:var(--text2)">${(d.bol_items||[]).map(it=>`${it.cantidad} ${it.unidad} · ${it.material?.referencia||'—'}`).join(' | ')}</div>
+    </div>`).join('');
+}
+
+window.saveDevolucion = async function() {
+  const fecha = document.getElementById('dev-fecha').value;
+  const proyecto_id = document.getElementById('dev-proyecto').value || null;
+  const driver = document.getElementById('dev-driver').value.trim();
+  const tracking = document.getElementById('dev-tracking').value.trim();
+  const motivo = document.getElementById('dev-motivo').value;
+  const obs = document.getElementById('dev-obs').value.trim();
+
+  if (!motivo) { toast('Selecciona el motivo de devolución', 'error'); return; }
+  if (devItems.length === 0) { toast('Agrega al menos un material', 'error'); return; }
+
+  try {
+    // Save as a special BOL with carrier = DEVOLUCION
+    const { data: bol, error } = await sb.from('bill_of_lading')
+      .insert({
+        bodega: STATE.bodega,
+        fecha,
+        proyecto_id,
+        driver: driver || 'N/A',
+        tracking,
+        carrier: 'DEVOLUCION',
+        notas: motivo + (obs ? ' — ' + obs : ''),
+        registrado_por: STATE.profile.id
+      })
+      .select().single();
+    if (error) throw error;
+
+    // Items marked as devolucion = true (suman al inventario via la vista)
+    const items = devItems.map(i => ({
+      bol_id: bol.id,
+      material_id: i.material_id,
+      cantidad: i.cantidad,
+      unidad: i.unidad,
+      es_devolucion: true
+    }));
+    const { error: ie } = await sb.from('bol_items').insert(items);
+    if (ie) throw ie;
+
+    devItems = [];
+    toast('Devolución registrada. Inventario actualizado.');
+    setContent(`
+      <div style="text-align:center;padding:40px">
+        <div style="width:56px;height:56px;border-radius:50%;background:var(--green-light);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:24px;color:var(--green-text)"><i class="ti ti-check"></i></div>
+        <div style="font-size:16px;font-weight:500;margin-bottom:6px">Devolución registrada</div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:6px">Motivo: <strong>${motivo}</strong></div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:20px">Los materiales se sumaron al inventario de ${STATE.bodega}.</div>
+        <div style="display:flex;gap:8px;justify-content:center">
+          <button class="btn btn-primary" onclick="navigateTo('devoluciones')"><i class="ti ti-plus"></i> Nueva devolución</button>
+          <button class="btn" onclick="navigateTo('stock')"><i class="ti ti-package"></i> Ver stock</button>
+        </div>
+      </div>`);
+  } catch (e) { toast(e.message, 'error'); }
 };
 
 // ── Helpers de datos ────────────────────────────────────────
