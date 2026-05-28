@@ -5,8 +5,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // ── Config Supabase ─────────────────────────────────────────
-const SUPABASE_URL = 'https://elybdaocjkepznfzusdz.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk';
+const SUPABASE_URL = 'https://elybdaocjkepznfzusdz.supabase.co';   // <-- reemplazar
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk';                        // <-- reemplazar
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Estado global ───────────────────────────────────────────
@@ -749,16 +749,17 @@ async function renderBOL() {
 
         <div class="section-title" style="margin-top:4px">Items del despacho</div>
         <div style="display:flex;gap:6px;margin-bottom:8px">
-          <select id="b-mat" style="flex:2">
+          <select id="b-mat" style="flex:2" onchange="onBolMatChange(this)">
             <option value="">Material...</option>
             ${materiales.map(m => `<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
           </select>
           <input type="number" id="b-qty" placeholder="Qty" min="1" style="width:65px">
           <select id="b-um" style="width:85px">
-            <option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>PACK</option><option>BOX</option>
+            <option>BUNDLE</option><option>BAG</option><option>UNIDAD</option><option>CAJA</option><option>SET</option>
           </select>
           <button class="btn btn-primary" onclick="addBolItem()" style="flex:none"><i class="ti ti-plus"></i></button>
         </div>
+        <div id="b-um-hint" style="font-size:11px;color:var(--text2);margin-bottom:4px;min-height:16px"></div>
         <div id="bol-items-list"></div>
         <button class="btn btn-primary" style="margin-top:10px;width:100%" onclick="saveBOL()">
           <i class="ti ti-device-floppy"></i> Guardar — actualiza OUTPUT e inventario
@@ -840,6 +841,62 @@ window.autocompleteBOL = function(sel) {
   updateBOLPreview();
 };
 
+// Helper: get valid units for a material
+function getUnidadesForMaterial(mat) {
+  if (!mat) return ['BUNDLE','BAG','UNIDAD','CAJA','ROLLO','SET'];
+  const units = [];
+  const ug = mat.unidad_grande || mat.unidad_base;
+  const ub = mat.unidad_base_minima || mat.unidad_base;
+  if (ug) units.push(ug);
+  if (ub && ub !== ug && ub !== '—') units.push(ub);
+  return units.length ? units : [mat.unidad_base];
+}
+
+// Helper: convert qty to base units
+function convertToBase(qty, unidad, mat) {
+  if (!mat || !mat.unidad_grande) return qty;
+  const ug = mat.unidad_grande;
+  const factor = mat.factor_conversion || 1;
+  // If user selected the grande unit, multiply by factor
+  if (unidad === ug) return qty * factor;
+  return qty;
+}
+
+window.onBolMatChange = function(sel) {
+  const matId = sel.value;
+  const mats = window._materialesCache || [];
+  const mat = mats.find(m => m.id === matId);
+  const umSel = document.getElementById('b-um');
+  if (!umSel || !mat) return;
+  const units = getUnidadesForMaterial(mat);
+  umSel.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join('');
+  // Show conversion hint
+  const hint = document.getElementById('b-um-hint');
+  if (hint) hint.textContent = mat.descripcion_conversion || '';
+};
+
+window.onInMatChange = function(sel) {
+  const matId = sel.value;
+  const mats = window._materialesCache || [];
+  const mat = mats.find(m => m.id === matId);
+  const umSel = document.getElementById('i-um');
+  if (!umSel || !mat) return;
+  const units = getUnidadesForMaterial(mat);
+  umSel.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join('');
+  const hint = document.getElementById('i-um-hint');
+  if (hint) hint.textContent = mat.descripcion_conversion || '';
+};
+
+window.onDevMatChange = function(sel) {
+  const matId = sel.value;
+  const mats = window._materialesCache || [];
+  const mat = mats.find(m => m.id === matId);
+  const umSel = document.getElementById('dev-um');
+  if (!umSel || !mat) return;
+  const units = getUnidadesForMaterial(mat);
+  umSel.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join('');
+};
+
 window.addBolItem = function() {
   const matEl = document.getElementById('b-mat');
   const matId = matEl.value;
@@ -847,10 +904,30 @@ window.addBolItem = function() {
   const qty = parseInt(document.getElementById('b-qty').value) || 0;
   const um = document.getElementById('b-um').value;
   if (!matId || qty < 1) { toast('Selecciona un material y cantidad', 'error'); return; }
+
+  // Convert to base units
+  const mats = window._materialesCache || [];
+  const mat = mats.find(m => m.id === matId);
+  const baseQty = convertToBase(qty, um, mat);
+  const baseUnit = mat?.unidad_base_minima || mat?.unidad_base || um;
+  const displayUnit = mat?.unidad_grande || um;
+
   const ex = bolItems.findIndex(i => i.material_id === matId);
-  if (ex >= 0) bolItems[ex].cantidad += qty;
-  else bolItems.push({ material_id: matId, referencia: matRef, cantidad: qty, unidad: um });
-  matEl.value = ''; document.getElementById('b-qty').value = '';
+  if (ex >= 0) {
+    bolItems[ex].cantidad += baseQty;
+    bolItems[ex].display_qty += qty;
+  } else {
+    bolItems.push({
+      material_id: matId,
+      referencia: matRef,
+      cantidad: baseQty,        // stored in base units
+      unidad: baseUnit,          // base unit stored in DB
+      display_qty: qty,          // what user entered
+      display_um: um             // what user selected
+    });
+  }
+  matEl.value = '';
+  document.getElementById('b-qty').value = '';
   renderBolItemsList();
   updateBOLPreview();
 };
@@ -860,7 +937,11 @@ function renderBolItemsList() {
   if (!el) return;
   el.innerHTML = bolItems.map((it, i) => `
     <div class="item-row">
-      <div style="flex:1;font-size:12px"><span style="font-weight:500">${it.cantidad} ${it.unidad}</span> · ${it.referencia}</div>
+      <div style="flex:1;font-size:12px">
+        <span style="font-weight:500">${it.display_qty||it.cantidad} ${it.display_um||it.unidad}</span>
+        ${it.display_um && it.display_um !== it.unidad ? `<span style="color:var(--text3);font-size:10px"> → ${it.cantidad} ${it.unidad}</span>` : ''}
+        · ${it.referencia}
+      </div>
       <button class="btn-icon" onclick="bolItems.splice(${i},1);renderBolItemsList();updateBOLPreview()"><i class="ti ti-x"></i></button>
     </div>`).join('');
 }
@@ -1150,14 +1231,15 @@ async function renderRecepcion() {
       <div class="card">
         <div class="section-title">Materiales recibidos</div>
         <div style="display:flex;gap:6px;margin-bottom:8px">
-          <select id="i-mat" style="flex:2">
+          <select id="i-mat" style="flex:2" onchange="onInMatChange(this)">
             <option value="">Material...</option>
             ${materiales.map(m => `<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
           </select>
           <input type="number" id="i-qty" placeholder="Qty" min="1" style="width:65px">
-          <select id="i-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>PACK</option></select>
+          <select id="i-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIDAD</option><option>CAJA</option></select>
           <button class="btn btn-primary" onclick="addInItem()" style="flex:none"><i class="ti ti-plus"></i></button>
         </div>
+        <div id="i-um-hint" style="font-size:11px;color:var(--text2);margin-bottom:4px;min-height:16px"></div>
         <div id="in-items-list"></div>
       </div>
       <button class="btn btn-primary btn-full" onclick="saveIN()">
@@ -1174,15 +1256,29 @@ window.addInItem = function() {
   const qty = parseInt(document.getElementById('i-qty').value) || 0;
   const um = document.getElementById('i-um').value;
   if (!matId || qty < 1) { toast('Selecciona un material y cantidad', 'error'); return; }
+
+  const mats = window._materialesCache || [];
+  const mat = mats.find(m => m.id === matId);
+  const baseQty = convertToBase(qty, um, mat);
+  const baseUnit = mat?.unidad_base_minima || mat?.unidad_base || um;
+
   const ex = inItems.findIndex(i => i.material_id === matId);
-  if (ex >= 0) inItems[ex].cantidad += qty;
-  else inItems.push({ material_id: matId, referencia: matRef, cantidad: qty, unidad: um });
+  if (ex >= 0) {
+    inItems[ex].cantidad += baseQty;
+    inItems[ex].display_qty += qty;
+  } else {
+    inItems.push({ material_id: matId, referencia: matRef, cantidad: baseQty, unidad: baseUnit, display_qty: qty, display_um: um });
+  }
   matEl.value = ''; document.getElementById('i-qty').value = '';
   const el = document.getElementById('in-items-list');
   if (el) el.innerHTML = inItems.map((it, i) => `
     <div class="item-row">
-      <div style="flex:1;font-size:12px"><span style="font-weight:500">+${it.cantidad} ${it.unidad}</span> · ${it.referencia}</div>
-      <button class="btn-icon" onclick="inItems.splice(${i},1);document.getElementById('in-items-list').innerHTML=inItems.map((it,j)=>'<div class=item-row><div style=flex:1;font-size:12px><span style=font-weight:500>+'+it.cantidad+' '+it.unidad+'</span> · '+it.referencia+'</div><button class=btn-icon onclick=inItems.splice('+j+',1)><i class=ti.ti-x></i></button></div>').join('')"><i class="ti ti-x"></i></button>
+      <div style="flex:1;font-size:12px">
+        <span style="font-weight:500">+${it.display_qty||it.cantidad} ${it.display_um||it.unidad}</span>
+        ${it.display_um && it.display_um !== it.unidad ? `<span style="color:var(--text3);font-size:10px"> → ${it.cantidad} ${it.unidad}</span>` : ''}
+        · ${it.referencia}
+      </div>
+      <button class="btn-icon" onclick="inItems.splice(${i},1);document.getElementById('in-items-list').innerHTML=''"><i class="ti ti-x"></i></button>
     </div>`).join('');
 };
 
@@ -1783,35 +1879,169 @@ window.createUser = async function() {
 async function renderMaterialesAdmin() {
   if (STATE.profile?.role !== 'admin') { setContent(`<div class="alert alert-danger">Acceso restringido</div>`); return; }
   setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`);
-  setTopbarActions(`<button class="btn btn-primary" onclick="showAddMaterial()"><i class="ti ti-plus"></i> Nuevo material</button>`);
-  const mats = await getMateriales();
+  setTopbarActions(`
+    <input type="search" placeholder="Buscar..." style="width:160px" oninput="filterTable('mat-body',this.value)">
+    <button class="btn btn-primary" onclick="showAddMaterial()"><i class="ti ti-plus"></i> Nuevo material</button>
+  `);
+  // Store materials globally for BOL/IN unit selectors
+  window._materialesCache = null;
+  const { data: mats } = await sb.from('materiales').select('*').eq('activo', true).order('referencia');
   setContent(`
     <div id="mat-form-area"></div>
     <div class="tbl-wrap">
-      <table>
-        <thead><tr><th>Referencia</th><th>Unidad</th><th style="text-align:right">Stock mínimo</th><th>Estado</th></tr></thead>
-        <tbody>
-          ${mats.map(m=>`<tr>
-            <td style="font-weight:500">${m.referencia}</td>
-            <td>${m.unidad_base}</td>
+      <table style="font-size:12px">
+        <thead><tr>
+          <th style="min-width:200px">Referencia</th>
+          <th>Unidad base</th>
+          <th>Unidad grande</th>
+          <th style="text-align:right">Factor</th>
+          <th>Conversión</th>
+          <th style="text-align:right">Stock mín.</th>
+          <th>Acciones</th>
+        </tr></thead>
+        <tbody id="mat-body">
+          ${(mats||[]).map(m=>`<tr>
+            <td style="font-weight:500" title="${m.referencia}">${m.referencia}</td>
+            <td><span class="badge b-blue">${m.unidad_base||'BUNDLE'}</span></td>
+            <td>${m.unidad_grande||'—'}</td>
+            <td style="text-align:right">${m.factor_conversion||1}</td>
+            <td style="font-size:11px;color:var(--text2)">${m.descripcion_conversion||'—'}</td>
             <td style="text-align:right">${m.stock_minimo}</td>
-            <td><span class="badge badge-ok">Activo</span></td>
+            <td>
+              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditMaterial('${m.id}','${m.referencia.replace(/'/g,"\\'")}','${m.unidad_base||'BUNDLE'}','${m.unidad_grande||''}',${m.factor_conversion||1},${m.stock_minimo})">
+                <i class="ti ti-edit"></i> Editar
+              </button>
+            </td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>`);
 }
 
-window.showAddMaterial = function() {
+window.showEditMaterial = function(id, ref, ub, ug, factor, minimo) {
   const el = document.getElementById('mat-form-area');
   if (!el) return;
   el.innerHTML = `
-    <div class="card" style="max-width:480px;margin-bottom:16px">
-      <div class="section-title">Agregar material</div>
+    <div class="card" style="max-width:560px;margin-bottom:16px">
+      <div class="section-title">Editar material — ${ref}</div>
+      <input type="hidden" id="em-id" value="${id}">
       <div class="grid2">
-        <div class="field" style="grid-column:1/-1"><label>Referencia</label><input type="text" id="nm-ref" placeholder="ej. R-21 UF Batt 15 x 105"></div>
-        <div class="field"><label>Unidad base</label><select id="nm-unit"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>PACK</option><option>BOX</option></select></div>
-        <div class="field"><label>Stock mínimo</label><input type="number" id="nm-min" value="20" min="0"></div>
+        <div class="field" style="grid-column:1/-1"><label>Referencia</label>
+          <input type="text" id="em-ref" value="${ref}">
+        </div>
+        <div class="field"><label>Unidad base <span style="font-size:10px;color:var(--text3)">(inventario siempre en esta unidad)</span></label>
+          <select id="em-ub">
+            ${['BAG','BUNDLE','UNIT','SET','TUBO','ROLLO','PACK','CAJA','PAR','LAMINA'].map(u=>`<option ${u===ub?'selected':''}>${u}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Unidad grande <span style="font-size:10px;color:var(--text3)">(presentación de compra/despacho)</span></label>
+          <select id="em-ug">
+            ${['BUNDLE','CAJA','PACK','ROLLO','PALLET','SET','PAR','UNIDAD','BAG'].map(u=>`<option ${u===ug?'selected':''}>${u}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Factor de conversión <span style="font-size:10px;color:var(--text3)">(1 unidad grande = ? unidades base)</span></label>
+          <input type="number" id="em-factor" value="${factor}" min="1">
+        </div>
+        <div class="field"><label>Stock mínimo</label>
+          <input type="number" id="em-min" value="${minimo}" min="0">
+        </div>
+        <div class="field" style="grid-column:1/-1"><label>Descripción de conversión</label>
+          <input type="text" id="em-desc" placeholder="ej. 1 bundle = 4 bolsas" value="">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="saveEditMaterial()"><i class="ti ti-device-floppy"></i> Guardar</button>
+        <button class="btn btn-danger" onclick="deactivateMaterial('${id}','${ref.replace(/'/g,"\\'")}')"><i class="ti ti-trash"></i> Desactivar</button>
+        <button class="btn" onclick="document.getElementById('mat-form-area').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+  // Set description after render
+  setTimeout(() => {
+    const desc = document.getElementById('em-desc');
+    if (desc) {
+      const factor2 = document.getElementById('em-factor').value;
+      const ug2 = document.getElementById('em-ug').value;
+      const ub2 = document.getElementById('em-ub').value;
+      desc.value = `1 ${ug2} = ${factor2} ${ub2}s`;
+    }
+  }, 50);
+  el.scrollIntoView({ behavior: 'smooth' });
+};
+
+window.saveEditMaterial = async function() {
+  const id = document.getElementById('em-id').value;
+  const ref = document.getElementById('em-ref').value.trim();
+  const ub = document.getElementById('em-ub').value;
+  const ug = document.getElementById('em-ug').value;
+  const factor = parseInt(document.getElementById('em-factor').value) || 1;
+  const minimo = parseInt(document.getElementById('em-min').value) || 0;
+  const desc = document.getElementById('em-desc').value.trim() || `1 ${ug} = ${factor} ${ub}s`;
+  if (!ref) { toast('La referencia es obligatoria', 'error'); return; }
+  const { error } = await sb.from('materiales').update({
+    referencia: ref, unidad_base: ub, unidad_grande: ug,
+    factor_conversion: factor, stock_minimo: minimo, descripcion_conversion: desc
+  }).eq('id', id);
+  if (error) { toast(error.message, 'error'); return; }
+  toast('Material actualizado');
+  renderMaterialesAdmin();
+};
+
+window.deactivateMaterial = async function(id, ref) {
+  if (!confirm(`¿Desactivar "${ref}"? No aparecerá en los selectores pero se conserva el historial.`)) return;
+  const { error } = await sb.from('materiales').update({ activo: false }).eq('id', id);
+  if (error) { toast(error.message, 'error'); return; }
+  toast('Material desactivado');
+  renderMaterialesAdmin();
+};
+}
+
+window.showAddMaterial = function() {
+  const el = document.getElementById('mat-form-area');
+  if (!el) return;
+  const unidades = ['BUNDLE','BAG','CAJA','PAQUETE','UNIDAD','ROLLO','SET','TUBO','LAMINA','BOLSA','PALLET','PAR','TARRO','CAJITA','PACK'];
+  const categorias = ['BATT','MINERAL WOOL','BLOW','SPRAY FOAM','CONSUMIBLE'];
+  el.innerHTML = `
+    <div class="card" style="max-width:620px;margin-bottom:16px">
+      <div class="section-title">Nuevo material</div>
+      <div class="grid2">
+        <div class="field" style="grid-column:1/-1">
+          <label>Referencia</label>
+          <input type="text" id="nm-ref" placeholder="ej. R-21 UF Batt 15 x 105">
+        </div>
+        <div class="field">
+          <label>Categoría</label>
+          <select id="nm-cat">
+            ${categorias.map(c=>`<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Stock mínimo</label>
+          <input type="number" id="nm-min" value="20" min="0">
+        </div>
+        <div class="field">
+          <label>Unidad Grande <span style="color:var(--text2);font-size:10px">(principal — entradas/salidas)</span></label>
+          <select id="nm-ug">
+            <option value="">— Solo unidad base —</option>
+            ${unidades.map(u=>`<option value="${u}">${u}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Unidad Base <span style="color:var(--text2);font-size:10px">(mínima — almacenada en inventario)</span></label>
+          <select id="nm-ub">
+            ${unidades.map(u=>`<option value="${u}">${u}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Factor de conversión</label>
+          <input type="number" id="nm-factor" value="1" min="1">
+        </div>
+        <div class="field">
+          <label>Descripción</label>
+          <input type="text" id="nm-desc" placeholder="ej. 1 BUNDLE = 4 BAGS">
+        </div>
+      </div>
+      <div style="background:var(--bg2);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--text2)">
+        <i class="ti ti-info-circle"></i> Solo se podrán seleccionar <strong>Unidad Grande</strong> o <strong>Unidad Base</strong> al registrar movimientos. No se podrán usar otras unidades.
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" onclick="saveMaterial()"><i class="ti ti-device-floppy"></i> Guardar</button>
@@ -1822,12 +2052,22 @@ window.showAddMaterial = function() {
 
 window.saveMaterial = async function() {
   const ref = document.getElementById('nm-ref').value.trim();
-  const unit = document.getElementById('nm-unit').value;
-  const min = parseInt(document.getElementById('nm-min').value) || 0;
+  const cat = document.getElementById('nm-cat').value;
+  const min = parseInt(document.getElementById('nm-min').value)||0;
+  const ug = document.getElementById('nm-ug').value||null;
+  const ub = document.getElementById('nm-ub').value;
+  const factor = parseInt(document.getElementById('nm-factor').value)||1;
+  const desc = document.getElementById('nm-desc').value.trim()||`1 ${ug||ub} = ${factor} ${ub}`;
   if (!ref) { toast('Ingresa la referencia del material', 'error'); return; }
-  const { error } = await sb.from('materiales').insert({ referencia: ref, unidad_base: unit, stock_minimo: min });
+  const { error } = await sb.from('materiales').insert({
+    referencia: ref, categoria: cat, stock_minimo: min,
+    unidad_base: ug||ub, unidad_grande: ug||null,
+    unidad_base_minima: ub, factor_conversion: factor,
+    descripcion_conversion: desc, activo: true
+  });
   if (error) { toast(error.message, 'error'); return; }
   toast('Material agregado');
+  window._materialesCache = null;
   renderMaterialesAdmin();
 };
 
@@ -2190,8 +2430,12 @@ async function getStockActual(bodega) {
 }
 
 async function getMateriales() {
-  const { data } = await sb.from('materiales').select('*').eq('activo', true).order('referencia');
-  return data || [];
+  if (window._materialesCache) return window._materialesCache;
+  const { data } = await sb.from('materiales')
+    .select('id,referencia,unidad_base,unidad_grande,unidad_base_minima,factor_conversion,descripcion_conversion,categoria,stock_minimo')
+    .eq('activo', true).order('referencia');
+  window._materialesCache = data || [];
+  return window._materialesCache;
 }
 
 async function getProyectos(bodega) {
