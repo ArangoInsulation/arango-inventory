@@ -5,8 +5,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // ── Config Supabase ─────────────────────────────────────────
-const SUPABASE_URL = 'https://elybdaocjkepznfzusdz.supabase.co';   // <-- reemplazar
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk';                        // <-- reemplazar
+const SUPABASE_URL = 'https://elybdaocjkepznfzusdz.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk';
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Estado global ───────────────────────────────────────────
@@ -895,6 +895,8 @@ window.onDevMatChange = function(sel) {
   if (!umSel || !mat) return;
   const units = getUnidadesForMaterial(mat);
   umSel.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join('');
+  const hint = document.getElementById('dev-um-hint');
+  if (hint) hint.textContent = mat.descripcion_conversion || '';
 };
 
 window.addBolItem = function() {
@@ -2289,14 +2291,15 @@ async function renderDevoluciones() {
         <div class="card">
           <div class="section-title">Materiales a devolver</div>
           <div style="display:flex;gap:6px;margin-bottom:8px">
-            <select id="dev-mat" style="flex:2">
+            <select id="dev-mat" style="flex:2" onchange="onDevMatChange(this)">
               <option value="">Material...</option>
               ${materiales.map(m=>`<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
             </select>
             <input type="number" id="dev-qty" placeholder="Qty" min="1" style="width:65px">
-            <select id="dev-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>PACK</option></select>
+            <select id="dev-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIDAD</option><option>CAJA</option></select>
             <button class="btn btn-primary" onclick="addDevItem()" style="flex:none"><i class="ti ti-plus"></i></button>
           </div>
+          <div id="dev-um-hint" style="font-size:11px;color:var(--text2);margin-bottom:4px;min-height:16px"></div>
           <div id="dev-items-list"></div>
         </div>
 
@@ -2324,9 +2327,19 @@ window.addDevItem = function() {
   const qty = parseInt(document.getElementById('dev-qty').value) || 0;
   const um = document.getElementById('dev-um').value;
   if (!matId || qty < 1) { toast('Selecciona un material y cantidad', 'error'); return; }
+
+  const mats = window._materialesCache || [];
+  const mat = mats.find(m => m.id === matId);
+  const baseQty = convertToBase(qty, um, mat);
+  const baseUnit = mat?.unidad_base_minima || mat?.unidad_base || um;
+
   const ex = devItems.findIndex(i => i.material_id === matId);
-  if (ex >= 0) devItems[ex].cantidad += qty;
-  else devItems.push({ material_id: matId, referencia: matRef, cantidad: qty, unidad: um });
+  if (ex >= 0) {
+    devItems[ex].cantidad += baseQty;
+    devItems[ex].display_qty += qty;
+  } else {
+    devItems.push({ material_id: matId, referencia: matRef, cantidad: baseQty, unidad: baseUnit, display_qty: qty, display_um: um });
+  }
   matEl.value = ''; document.getElementById('dev-qty').value = '';
   renderDevItems();
 };
@@ -2336,7 +2349,11 @@ function renderDevItems() {
   if (!el) return;
   el.innerHTML = devItems.map((it, i) => `
     <div class="item-row">
-      <div style="flex:1;font-size:12px"><span style="font-weight:500">+${it.cantidad} ${it.unidad}</span> · ${it.referencia}</div>
+      <div style="flex:1;font-size:12px">
+        <span style="font-weight:500">+${it.display_qty||it.cantidad} ${it.display_um||it.unidad}</span>
+        ${it.display_um && it.display_um !== it.unidad ? `<span style="color:var(--text3);font-size:10px"> → ${it.cantidad} ${it.unidad}</span>` : ''}
+        · ${it.referencia}
+      </div>
       <button class="btn-icon" onclick="devItems.splice(${i},1);renderDevItems()"><i class="ti ti-x"></i></button>
     </div>`).join('');
 }
