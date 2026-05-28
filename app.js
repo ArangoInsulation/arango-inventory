@@ -1012,6 +1012,7 @@ window.saveBOL = async function() {
     if (ie) throw ie;
     bolItems = [];
     toast('Bill of Lading guardado. Inventario actualizado.');
+    invalidateStockCache(STATE.bodega);
     setContent(`
       <div style="text-align:center;padding:40px">
         <div style="width:56px;height:56px;border-radius:50%;background:var(--green-light);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:24px;color:var(--green-text)"><i class="ti ti-check"></i></div>
@@ -1335,6 +1336,7 @@ window.saveIN = async function() {
     const { error: ie } = await sb.from('entradas_items').insert(items);
     if (ie) throw ie;
     toast('Entrada registrada. Inventario actualizado.');
+    invalidateStockCache(STATE.bodega);
     inItems = [];
     setContent(`
       <div style="text-align:center;padding:40px">
@@ -2248,6 +2250,7 @@ window.saveProyecto = async function() {
   const { error } = await sb.from('proyectos').insert({ nombre, ciudad, estado, direccion: dir, compania: comp, bodega, pm_id, activo: true });
   if (error) { toast(error.message, 'error'); return; }
   toast('Proyecto creado');
+  _cache.proyectos = null;
   renderProyectosAdmin();
 };
 
@@ -2262,6 +2265,7 @@ window.updateProyecto = async function() {
   const { error } = await sb.from('proyectos').update({ nombre, ciudad, estado, bodega, pm_id }).eq('id', id);
   if (error) { toast(error.message, 'error'); return; }
   toast('Proyecto actualizado');
+  _cache.proyectos = null;
   renderProyectosAdmin();
 };
 
@@ -2448,6 +2452,7 @@ window.saveDevolucion = async function() {
 
     devItems = [];
     toast('Devolución registrada. Inventario actualizado.');
+    invalidateStockCache(STATE.bodega);
     setContent(`
       <div style="text-align:center;padding:40px">
         <div style="width:56px;height:56px;border-radius:50%;background:var(--green-light);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:24px;color:var(--green-text)"><i class="ti ti-check"></i></div>
@@ -2463,10 +2468,32 @@ window.saveDevolucion = async function() {
 };
 
 // ── Helpers de datos ────────────────────────────────────────
+// ── Cache global ─────────────────────────────────────────────
+const _cache = {
+  stock: {},      // { bodega_timestamp: data }
+  proyectos: null,
+  proyectosTTL: 0,
+  TTL: 3 * 60 * 1000  // 3 minutos
+};
+
 async function getStockActual(bodega) {
-  const { data, error } = await sb.from('stock_actual').select('*').eq('bodega', bodega).order('referencia');
+  const key = bodega;
+  const now = Date.now();
+  if (_cache.stock[key] && (now - _cache.stock[key].ts) < _cache.TTL) {
+    return _cache.stock[key].data;
+  }
+  const { data, error } = await sb.from('stock_actual')
+    .select('referencia,bodega,stock_inicial,total_entradas,total_salidas,saldo_actual,stock_minimo,estado_stock')
+    .eq('bodega', bodega)
+    .order('referencia');
   if (error) throw error;
+  _cache.stock[key] = { data: data || [], ts: now };
   return data || [];
+}
+
+function invalidateStockCache(bodega) {
+  if (bodega) delete _cache.stock[bodega];
+  else _cache.stock = {};
 }
 
 async function getMateriales() {
@@ -2479,12 +2506,22 @@ async function getMateriales() {
 }
 
 async function getProyectos(bodega) {
-  const { data } = await sb.from('proyectos').select('*').eq('activo', true).order('nombre');
-  return data || [];
+  const now = Date.now();
+  if (_cache.proyectos && (now - _cache.proyectosTTL) < _cache.TTL) {
+    return _cache.proyectos;
+  }
+  const { data } = await sb.from('proyectos')
+    .select('id,nombre,ciudad,estado,compania,pm_nombre,direccion,bodega')
+    .eq('activo', true).order('nombre');
+  _cache.proyectos = data || [];
+  _cache.proyectosTTL = now;
+  return _cache.proyectos;
 }
 
 async function getPMs() {
-  const { data } = await sb.from('profiles').select('id, full_name').eq('role', 'pm').order('full_name');
+  const { data } = await sb.from('profiles')
+    .select('id,full_name')
+    .eq('role', 'pm').order('full_name');
   return data || [];
 }
 
