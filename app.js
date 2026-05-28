@@ -342,7 +342,7 @@ async function renderDashboard() {
       <div class="card">
         <div class="section-title">Movimientos mensuales 2026</div>
         <div class="db-leg">
-          <span><span class="db-ldot" style="background:#378ADD"></span>Entradas</span>
+          <span><span class="db-ldot" style="background:#0C2461"></span>Entradas</span>
           <span><span class="db-ldot" style="background:#639922"></span>Salidas</span>
           <span><span class="db-ldot" style="background:#854F0B"></span>Devoluciones</span>
         </div>
@@ -353,7 +353,7 @@ async function renderDashboard() {
       <div class="card">
         <div class="section-title">Actividad por bodega — entradas vs salidas</div>
         <div class="db-leg">
-          <span><span class="db-ldot" style="background:#378ADD"></span>Entradas</span>
+          <span><span class="db-ldot" style="background:#0C2461"></span>Entradas</span>
           <span><span class="db-ldot" style="background:#639922"></span>Salidas</span>
           <span><span class="db-ldot" style="background:#E24B4A;width:18px;height:3px;border-radius:0"></span>Tendencia</span>
         </div>
@@ -442,7 +442,7 @@ function initDashCharts() {
     data:{
       labels:MOV.labels,
       datasets:[
-        {label:'Entradas',data:MOV.e,backgroundColor:'#378ADD'},
+        {label:'Entradas',data:MOV.e,backgroundColor:'#0C2461'},
         {label:'Salidas',data:MOV.s,backgroundColor:'#639922'},
         {label:'Devoluciones',data:MOV.d,backgroundColor:'#854F0B'}
       ]
@@ -457,7 +457,7 @@ function initDashCharts() {
     data:{
       labels:bLabels,
       datasets:[
-        {type:'bar',label:'Entradas',data:bLabels.map(b=>BOD[b].e),backgroundColor:'rgba(55,138,221,0.85)',borderRadius:4},
+        {type:'bar',label:'Entradas',data:bLabels.map(b=>BOD[b].e),backgroundColor:'rgba(12,36,97,0.85)',borderRadius:4},
         {type:'bar',label:'Salidas',data:bLabels.map(b=>BOD[b].s),backgroundColor:'rgba(99,153,34,0.85)',borderRadius:4},
         {type:'line',label:'Tendencia',data:bLabels.map(b=>Math.round((BOD[b].e+BOD[b].s)/2)),
          borderColor:'#E24B4A',borderWidth:2.5,pointBackgroundColor:'#E24B4A',
@@ -503,16 +503,17 @@ async function dbLoadBodegaStock(bodega) {
 async function renderStock() {
   const role = STATE.profile?.role;
   const canSeeAll = ['admin','jefe_bodega','supervisor'].includes(role);
+  const today = new Date().toISOString().slice(0,10);
 
   setTopbarActions(`
-    <input type="search" placeholder="Buscar material..." style="width:160px" id="stock-search" oninput="filterStock(this.value)">
-    ${canEdit() ? `<button class="btn btn-success" onclick="navigateTo('recepcion')"><i class="ti ti-plus"></i> Nueva entrada</button>` : ''}
+    <input type="search" placeholder="Buscar material..." style="width:150px" id="stock-search" oninput="filterStock(this.value)">
+    <button class="btn btn-success" onclick="exportStockExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar</button>
+    ${canEdit() ? `<button class="btn btn-primary" onclick="navigateTo('recepcion')"><i class="ti ti-plus"></i> Nueva entrada</button>` : ''}
   `);
 
-  // Tab bar — show global/resumen only for admin, jefe_bodega, supervisor
   const tabs = canSeeAll
     ? `<div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:0.5px solid var(--border);padding-bottom:0">
-        <button class="btn" id="tab-individual" onclick="switchStockTab('individual')" style="border-bottom:2px solid var(--blue);border-radius:0;color:var(--blue)">Por bodega</button>
+        <button class="btn" id="tab-individual" onclick="switchStockTab('individual')" style="border-bottom:2px solid var(--navy);border-radius:0;color:var(--navy);font-weight:600">Por bodega</button>
         <button class="btn" id="tab-global" onclick="switchStockTab('global')" style="border-radius:0">Vista global</button>
         <button class="btn" id="tab-resumen" onclick="switchStockTab('resumen')" style="border-radius:0">Resumen por bodega</button>
       </div>`
@@ -527,6 +528,28 @@ async function renderStock() {
 
   loadStockTab('individual');
 }
+
+window.exportStockExcel = async function() {
+  const data = window._lastStockData || await getStockActual(STATE.bodega);
+  if (!data?.length) { toast('No hay datos para exportar', 'error'); return; }
+  const headers = ['Referencia','Stock Inicial','Entradas','Salidas','Saldo','Stock Mínimo','Estado'];
+  const rows = [headers.join(',')];
+  data.forEach(i => {
+    rows.push([
+      `"${i.referencia}"`,
+      i.stock_inicial, i.total_entradas, i.total_salidas,
+      i.saldo_actual, i.stock_minimo, i.estado_stock
+    ].join(','));
+  });
+  const blob = new Blob(['\uFEFF' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Stock_${STATE.bodega}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Stock exportado correctamente');
+};
 
 window.switchStockTab = function(tab) {
   document.querySelectorAll('[id^="tab-"]').forEach(t => {
@@ -546,6 +569,7 @@ async function loadStockTab(tab) {
     el.innerHTML = `<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`;
     try {
       const data = await getStockActual(STATE.bodega);
+      window._lastStockData = data; // store for export
       el.innerHTML = `
         <div class="tbl-wrap">
           <table id="stock-table">
