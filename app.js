@@ -5,8 +5,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // ── Config Supabase ─────────────────────────────────────────
-const SUPABASE_URL = 'https://elybdaocjkepznfzusdz.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk';
+const SUPABASE_URL = 'https://elybdaocjkepznfzusdz.supabase.co';   // <-- reemplazar
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVseWJkYW9jamtlcHpuZnp1c2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjA0OTgsImV4cCI6MjA5NDY5NjQ5OH0.j34a-SS0jOxH2YFAizPFR0Ql-aeD_0m_suf3XvG0hjk';                        // <-- reemplazar
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Estado global ───────────────────────────────────────────
@@ -1993,7 +1993,6 @@ window.deactivateMaterial = async function(id, ref) {
   toast('Material desactivado');
   renderMaterialesAdmin();
 };
-}
 
 window.showAddMaterial = function() {
   const el = document.getElementById('mat-form-area');
