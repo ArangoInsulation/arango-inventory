@@ -1974,41 +1974,56 @@ async function renderMaterialesAdmin() {
     </div>`);
 }
 
-window.showEditMaterial = function(id, ref, ub, ug, factor, minimo) {
+window.showEditMaterial = async function(id, ref, ub, ug, factor, minimo) {
   const el = document.getElementById('mat-form-area');
   if (!el) return;
+  // Load per-bodega minimums
+  const { data: minData } = await sb.from('stock_minimo_bodega').select('bodega,stock_minimo').eq('material_id', id);
+  const minMap = {};
+  (minData || []).forEach(r => { minMap[r.bodega] = r.stock_minimo; });
+  const bodegas = ['Charlotte','Atlanta','Orlando','Tennessee'];
   el.innerHTML = `
-    <div class="card" style="max-width:560px;margin-bottom:16px">
-      <div class="section-title">Editar material — ${ref}</div>
+    <div class="card" style="max-width:640px;margin-bottom:16px">
+      <div class="section-title">Edit Material — ${ref}</div>
       <input type="hidden" id="em-id" value="${id}">
       <div class="grid2">
-        <div class="field" style="grid-column:1/-1"><label>Referencia</label>
+        <div class="field" style="grid-column:1/-1"><label>Reference</label>
           <input type="text" id="em-ref" value="${ref}">
         </div>
-        <div class="field"><label>Unidad base <span style="font-size:10px;color:var(--text3)">(inventario siempre en esta unidad)</span></label>
+        <div class="field"><label>Base Unit <span style="font-size:10px;color:var(--text3)">(stored in inventory)</span></label>
           <select id="em-ub">
             ${['BAG','BUNDLE','UNIT','SET','TUBE','ROLL','PACK','BOX','PAR','SHEET'].map(u=>`<option ${u===ub?'selected':''}>${u}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Unidad grande <span style="font-size:10px;color:var(--text3)">(presentación de compra/despacho)</span></label>
+        <div class="field"><label>Large Unit <span style="font-size:10px;color:var(--text3)">(purchase/dispatch unit)</span></label>
           <select id="em-ug">
             ${['BUNDLE','BOX','PACK','ROLL','PALLET','SET','PAR','UNIT','BAG'].map(u=>`<option ${u===ug?'selected':''}>${u}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Factor de conversión <span style="font-size:10px;color:var(--text3)">(1 unidad grande = ? unidades base)</span></label>
+        <div class="field"><label>Conversion Factor <span style="font-size:10px;color:var(--text3)">(1 large = ? base units)</span></label>
           <input type="number" id="em-factor" value="${factor}" min="1">
         </div>
-        <div class="field"><label>Stock mínimo</label>
+        <div class="field"><label>Global Min. Stock <span style="font-size:10px;color:var(--text3)">(fallback)</span></label>
           <input type="number" id="em-min" value="${minimo}" min="0">
         </div>
-        <div class="field" style="grid-column:1/-1"><label>Descripción de conversión</label>
-          <input type="text" id="em-desc" placeholder="ej. 1 bundle = 4 bolsas" value="">
+        <div class="field" style="grid-column:1/-1"><label>Conversion Description</label>
+          <input type="text" id="em-desc" placeholder="e.g. 1 BUNDLE = 4 BAGS" value="">
         </div>
       </div>
+      <div style="margin:10px 0 6px;font-weight:600;font-size:12px;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;border-top:1px solid var(--border);padding-top:10px">
+        <i class="ti ti-building-warehouse"></i> Min. Stock per Warehouse
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+        ${bodegas.map(b => `
+          <div>
+            <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">${b}</label>
+            <input type="number" id="em-min-${b}" value="${minMap[b] !== undefined ? minMap[b] : minimo}" min="0" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px">
+          </div>`).join('')}
+      </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" id="em-save-btn" onclick="saveEditMaterial(this)"><i class="ti ti-device-floppy"></i> Guardar</button>
-        <button class="btn btn-danger" onclick="deactivateMaterial('${id}','${ref.replace(/'/g,"\\'")}')"><i class="ti ti-trash"></i> Desactivar</button>
-        <button class="btn" onclick="document.getElementById('mat-form-area').innerHTML=''">Cancelar</button>
+        <button class="btn btn-primary" id="em-save-btn" onclick="saveEditMaterial(this)"><i class="ti ti-device-floppy"></i> Save</button>
+        <button class="btn btn-danger" onclick="deactivateMaterial('${id}','${ref.replace(/'/g,"\\'")}')" ><i class="ti ti-trash"></i> Deactivate</button>
+        <button class="btn" onclick="document.getElementById('mat-form-area').innerHTML=''">Cancel</button>
       </div>
     </div>`;
   // Set description after render
@@ -2027,29 +2042,38 @@ window.showEditMaterial = function(id, ref, ub, ug, factor, minimo) {
 window.saveEditMaterial = async function(btn) {
   if (btn && btn.disabled) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  // Read all values BEFORE any DOM changes
+  const id    = document.getElementById('em-id')?.value;
+  const ref   = document.getElementById('em-ref')?.value.trim();
+  const ub    = document.getElementById('em-ub')?.value;
+  const ug    = document.getElementById('em-ug')?.value;
+  const factor = parseInt(document.getElementById('em-factor')?.value) || 1;
+  const minimo = parseInt(document.getElementById('em-min')?.value) || 0;
+  const desc  = document.getElementById('em-desc')?.value.trim() || ('1 ' + ug + ' = ' + factor + ' ' + ub + 's');
+  // Validate
+  if (!id)  { toast('Material ID missing', 'error');   if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
+  if (!ref) { toast('Reference is required', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
+  // Save stock_minimo per bodega if inputs exist
+  const bodegas = ['Charlotte','Atlanta','Orlando','Tennessee'];
+  const minRows = bodegas
+    .map(b => ({ material_id: id, bodega: b, stock_minimo: parseInt(document.getElementById('em-min-' + b)?.value) || 0 }))
+    .filter(r => document.getElementById('em-min-' + r.bodega));
   try {
-    const id = document.getElementById('em-id')?.value;
-    const ref = document.getElementById('em-ref')?.value.trim();
-    const ub = document.getElementById('em-ub')?.value;
-    const ug = document.getElementById('em-ug')?.value;
-    const factor = parseInt(document.getElementById('em-factor')?.value) || 1;
-    const minimo = parseInt(document.getElementById('em-min')?.value) || 0;
-    const desc = document.getElementById('em-desc')?.value.trim() || ('1 ' + ug + ' = ' + factor + ' ' + ub + 's');
-    if (!id) { toast('Material ID missing', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
-    if (!ref) { toast('Reference is required', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
-    const { data, error } = await sb.from('materiales').update({
+    const { error } = await sb.from('materiales').update({
       referencia: ref, unidad_base: ub, unidad_grande: ug,
       factor_conversion: factor, stock_minimo: minimo, descripcion_conversion: desc
-    }).eq('id', id).select();
+    }).eq('id', id);
     if (error) throw error;
-    console.log('Material update result:', data);
+    // Upsert per-bodega minimums if table exists
+    if (minRows.length) {
+      await sb.from('stock_minimo_bodega').upsert(minRows, { onConflict: 'material_id,bodega' });
+    }
     toast('Material updated');
     window._materialesCache = null;
-    document.getElementById('mat-form-area').innerHTML = '';
     await renderMaterialesAdmin();
   } catch(e) {
     console.error('saveEditMaterial error:', e);
-    toast(e.message || 'Save failed', 'error');
+    toast(e.message || 'Save failed — check console', 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; }
   }
 };
