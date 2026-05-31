@@ -2008,21 +2008,32 @@ window.showEditMaterial = function(id, ref, ub, ug, factor, minimo) {
 };
 
 window.saveEditMaterial = async function() {
-  const id = document.getElementById('em-id').value;
-  const ref = document.getElementById('em-ref').value.trim();
-  const ub = document.getElementById('em-ub').value;
-  const ug = document.getElementById('em-ug').value;
-  const factor = parseInt(document.getElementById('em-factor').value) || 1;
-  const minimo = parseInt(document.getElementById('em-min').value) || 0;
-  const desc = document.getElementById('em-desc').value.trim() || `1 ${ug} = ${factor} ${ub}s`;
-  if (!ref) { toast('La referencia es obligatoria', 'error'); return; }
-  const { error } = await sb.from('materiales').update({
-    referencia: ref, unidad_base: ub, unidad_grande: ug,
-    factor_conversion: factor, stock_minimo: minimo, descripcion_conversion: desc
-  }).eq('id', id);
-  if (error) { toast(error.message, 'error'); return; }
-  toast('Material actualizado');
-  renderMaterialesAdmin();
+  const btn = document.querySelector('#mat-form-area .btn-primary');
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const id = document.getElementById('em-id')?.value;
+    const ref = document.getElementById('em-ref')?.value.trim();
+    const ub = document.getElementById('em-ub')?.value;
+    const ug = document.getElementById('em-ug')?.value;
+    const factorRaw = document.getElementById('em-factor')?.value;
+    const minimoRaw = document.getElementById('em-min')?.value;
+    const factor = (factorRaw !== '' && !isNaN(factorRaw)) ? parseInt(factorRaw) : 1;
+    const minimo = (minimoRaw !== '' && !isNaN(minimoRaw)) ? parseInt(minimoRaw) : 0;
+    const desc = document.getElementById('em-desc')?.value.trim() || `1 ${ug} = ${factor} ${ub}s`;
+    if (!ref) { toast('Reference is required', 'error'); return; }
+    const { error } = await sb.from('materiales').update({
+      referencia: ref, unidad_base: ub, unidad_grande: ug,
+      factor_conversion: factor, stock_minimo: minimo, descripcion_conversion: desc
+    }).eq('id', id);
+    if (error) throw error;
+    toast('Material updated');
+    window._materialesCache = null;
+    await renderMaterialesAdmin();
+  } catch(e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; }
+  }
 };
 
 window.deactivateMaterial = async function(id, ref) {
@@ -2089,24 +2100,35 @@ window.showAddMaterial = function() {
 };
 
 window.saveMaterial = async function() {
-  const ref = document.getElementById('nm-ref').value.trim();
-  const cat = document.getElementById('nm-cat').value;
-  const min = parseInt(document.getElementById('nm-min').value)||0;
-  const ug = document.getElementById('nm-ug').value||null;
-  const ub = document.getElementById('nm-ub').value;
-  const factor = parseInt(document.getElementById('nm-factor').value)||1;
-  const desc = document.getElementById('nm-desc').value.trim()||`1 ${ug||ub} = ${factor} ${ub}`;
-  if (!ref) { toast('Ingresa la referencia del material', 'error'); return; }
-  const { error } = await sb.from('materiales').insert({
-    referencia: ref, categoria: cat, stock_minimo: min,
-    unidad_base: ug||ub, unidad_grande: ug||null,
-    unidad_base_minima: ub, factor_conversion: factor,
-    descripcion_conversion: desc, activo: true
-  });
-  if (error) { toast(error.message, 'error'); return; }
-  toast('Material agregado');
-  window._materialesCache = null;
-  renderMaterialesAdmin();
+  const btn = document.querySelector('#mat-form-area .btn-primary');
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const ref = document.getElementById('nm-ref')?.value.trim();
+    const cat = document.getElementById('nm-cat')?.value;
+    const minimoRaw = document.getElementById('nm-min')?.value;
+    const min = (minimoRaw !== '' && !isNaN(minimoRaw)) ? parseInt(minimoRaw) : 0;
+    const ug = document.getElementById('nm-ug')?.value || null;
+    const ub = document.getElementById('nm-ub')?.value;
+    const factorRaw = document.getElementById('nm-factor')?.value;
+    const factor = (factorRaw !== '' && !isNaN(factorRaw)) ? parseInt(factorRaw) : 1;
+    const desc = document.getElementById('nm-desc')?.value.trim() || `1 ${ug||ub} = ${factor} ${ub}`;
+    if (!ref) { toast('Enter material reference', 'error'); return; }
+    if (!ub) { toast('Select a base unit', 'error'); return; }
+    const { error } = await sb.from('materiales').insert({
+      referencia: ref, categoria: cat || null, stock_minimo: min,
+      unidad_base: ug || ub, unidad_grande: ug || null,
+      unidad_base_minima: ub, factor_conversion: factor,
+      descripcion_conversion: desc, activo: true
+    });
+    if (error) throw error;
+    toast('Material added');
+    window._materialesCache = null;
+    await renderMaterialesAdmin();
+  } catch(e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; }
+  }
 };
 
 // ════════════════════════════════════════════════════════════
