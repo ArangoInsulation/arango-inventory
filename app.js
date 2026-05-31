@@ -2370,77 +2370,105 @@ let devItems = [];
 
 async function renderDevoluciones() {
   devItems = [];
-  setTopbarActions('');
+  const today = new Date().toISOString().slice(0,10);
+  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10);
   const materiales = await getMateriales();
   const proyectos = await getProyectos(STATE.bodega);
 
+  setTopbarActions(`
+    <input type="date" id="dev-desde" value="${firstDay}" style="width:130px">
+    <span style="font-size:12px;color:var(--text2)">to</span>
+    <input type="date" id="dev-hasta" value="${today}" style="width:130px">
+    <button class="btn btn-primary" onclick="loadDevHistory()"><i class="ti ti-search"></i> Search</button>
+    <button class="btn btn-success" onclick="exportDevCSV()"><i class="ti ti-file-spreadsheet"></i> Export</button>
+    <button class="btn btn-primary" onclick="toggleDevForm()" id="btn-new-dev"><i class="ti ti-plus"></i> New Return</button>
+  `);
+
   setContent(`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div>
-        <div class="alert alert-info"><i class="ti ti-info-circle"></i> Al guardar, los materiales se suman al inventario de ${STATE.bodega}.</div>
-        <div class="card">
-          <div class="section-title">Datos de la devolución</div>
-          <div class="grid2">
-            <div class="field"><label>Fecha</label>
-              <input type="date" id="dev-fecha" value="${new Date().toISOString().slice(0,10)}">
-            </div>
-            <div class="field"><label>Proyecto</label>
-              <select id="dev-proyecto">
-                <option value="">Seleccionar...</option>
-                ${proyectos.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field"><label>Driver / Installer</label>
-              <input type="text" id="dev-driver" placeholder="Nombre del instalador">
-            </div>
-            <div class="field"><label>Tracking #</label>
-              <input type="text" id="dev-tracking" placeholder="Opcional">
-            </div>
-            <div class="field" style="grid-column:1/-1"><label>Motivo de devolución <span style="color:var(--red-text)">*</span></label>
-              <select id="dev-motivo">
-                <option value="">Seleccionar motivo...</option>
-                <option value="Devolución de material sobrante">Devolución de material sobrante</option>
-                <option value="No era el material correcto">No era el material correcto</option>
-                <option value="Material en mal estado">Material en mal estado</option>
-              </select>
-            </div>
-            <div class="field" style="grid-column:1/-1"><label>Observaciones</label>
-              <textarea id="dev-obs" placeholder="Detalles adicionales..." style="width:100%;min-height:70px;padding:8px 10px;border:0.5px solid var(--border2);border-radius:var(--border-radius-md);background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+    <div id="dev-form-area" style="display:none">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div>
+          <div class="alert alert-info"><i class="ti ti-info-circle"></i> When saved, materials are added back to ${STATE.bodega} inventory.</div>
+          <div class="card">
+            <div class="section-title">Return Details</div>
+            <div class="grid2">
+              <div class="field"><label>Date</label>
+                <input type="date" id="dev-fecha" value="${today}">
+              </div>
+              <div class="field"><label>Project</label>
+                <select id="dev-proyecto">
+                  <option value="">Select...</option>
+                  ${proyectos.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('')}
+                </select>
+              </div>
+              <div class="field"><label>Driver</label>
+                <input type="text" id="dev-driver" placeholder="Driver name (optional)">
+              </div>
+              <div class="field"><label>Installer</label>
+                <input type="text" id="dev-installer" placeholder="Installer name (optional)">
+              </div>
+              <div class="field"><label>Tracking #</label>
+                <input type="text" id="dev-tracking" placeholder="Optional">
+              </div>
+              <div class="field"><label>Return Reason <span style="color:var(--red-text)">*</span></label>
+                <select id="dev-motivo">
+                  <option value="">Select reason...</option>
+                  <option value="Leftover material return">Leftover material return</option>
+                  <option value="Wrong material delivered">Wrong material delivered</option>
+                  <option value="Damaged material">Damaged material</option>
+                </select>
+              </div>
+              <div class="field" style="grid-column:1/-1"><label>Notes</label>
+                <textarea id="dev-obs" placeholder="Additional details..." style="width:100%;min-height:70px;padding:8px 10px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+              </div>
             </div>
           </div>
         </div>
-
-        <div class="card">
-          <div class="section-title">Materiales a devolver</div>
-          <div style="display:flex;gap:6px;margin-bottom:8px">
-            <select id="dev-mat" style="flex:2" onchange="onDevMatChange(this)">
-              <option value="">Material...</option>
-              ${materiales.map(m=>`<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
-            </select>
-            <input type="number" id="dev-qty" placeholder="Qty" min="1" style="width:65px">
-            <select id="dev-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>BOX</option></select>
-            <button class="btn btn-primary" onclick="addDevItem()" style="flex:none"><i class="ti ti-plus"></i></button>
+        <div>
+          <div class="card">
+            <div class="section-title">Materials to Return</div>
+            <div style="display:flex;gap:6px;margin-bottom:8px">
+              <select id="dev-mat" style="flex:2" onchange="onDevMatChange(this)">
+                <option value="">Material...</option>
+                ${materiales.map(m=>`<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
+              </select>
+              <input type="number" id="dev-qty" placeholder="Qty" min="1" style="width:65px">
+              <select id="dev-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>BOX</option></select>
+              <button class="btn btn-primary" onclick="addDevItem()" style="flex:none"><i class="ti ti-plus"></i></button>
+            </div>
+            <div id="dev-um-hint" style="font-size:11px;color:var(--text2);margin-bottom:4px;min-height:16px"></div>
+            <div id="dev-items-list"></div>
           </div>
-          <div id="dev-um-hint" style="font-size:11px;color:var(--text2);margin-bottom:4px;min-height:16px"></div>
-          <div id="dev-items-list"></div>
-        </div>
-
-        <button class="btn btn-primary btn-full" onclick="saveDevolucion()">
-          <i class="ti ti-device-floppy"></i> Registrar devolución — suma al inventario
-        </button>
-      </div>
-
-      <div>
-        <div class="section-title">Historial de devoluciones recientes</div>
-        <div id="dev-history-list">
-          <div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>
+          <button class="btn btn-primary btn-full" onclick="saveDevolucion()">
+            <i class="ti ti-device-floppy"></i> Save Return — adds to inventory
+          </button>
         </div>
       </div>
+    </div>
+
+    <div id="dev-summary-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+      <div class="stat-card"><div class="stat-label">Returns (page)</div><div class="stat-value" id="dev-stat-count">—</div></div>
+      <div class="stat-card"><div class="stat-label">Total Units</div><div class="stat-value" id="dev-stat-units">—</div></div>
+      <div class="stat-card"><div class="stat-label">Warehouse</div><div class="stat-value" style="font-size:16px">${STATE.bodega}</div></div>
+      <div class="stat-card"><div class="stat-label">Period</div><div class="stat-value" id="dev-stat-period" style="font-size:13px">—</div></div>
+    </div>
+
+    <div id="dev-history-list">
+      <div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Loading...</div>
     </div>
   `);
 
   loadDevHistory();
 }
+
+window.toggleDevForm = function() {
+  const form = document.getElementById('dev-form-area');
+  const btn = document.getElementById('btn-new-dev');
+  if (!form) return;
+  const open = form.style.display === 'none';
+  form.style.display = open ? 'block' : 'none';
+  if (btn) btn.innerHTML = open ? '<i class="ti ti-x"></i> Close' : '<i class="ti ti-plus"></i> New Return';
+};
 
 window.addDevItem = function() {
   const matEl = document.getElementById('dev-mat');
@@ -2483,33 +2511,113 @@ function renderDevItems() {
 async function loadDevHistory() {
   const el = document.getElementById('dev-history-list');
   if (!el) return;
-  const { data } = await sb.from('bill_of_lading')
-    .select(`fecha, notas, driver, proyecto:proyectos(nombre), bol_items(cantidad, unidad, material:materiales(referencia))`)
+  const desde = document.getElementById('dev-desde')?.value || '';
+  const hasta = document.getElementById('dev-hasta')?.value || '';
+
+  el.innerHTML = `<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Loading...</div>`;
+
+  let query = sb.from('bill_of_lading')
+    .select(`id, fecha, notas, driver, installer, tracking,
+      registrado_por:profiles!registrado_por(full_name),
+      proyecto:proyectos(nombre, ciudad, estado),
+      bol_items(cantidad, unidad, es_devolucion, material:materiales(referencia))`)
     .eq('bodega', STATE.bodega)
     .eq('carrier', 'DEVOLUCION')
     .order('fecha', { ascending: false })
-    .limit(20);
+    .limit(200);
+  if (desde) query = query.gte('fecha', desde);
+  if (hasta) query = query.lte('fecha', hasta);
+
+  const { data } = await query;
 
   if (!data?.length) {
-    el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text2);font-size:13px">Sin devoluciones registradas aún.</div>`;
+    el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text2);font-size:13px">No returns found for this period.</div>`;
+    document.getElementById('dev-stat-count').textContent = '0';
+    document.getElementById('dev-stat-units').textContent = '0';
+    document.getElementById('dev-stat-period').textContent = desde && hasta ? desde + ' → ' + hasta : 'All';
     return;
   }
 
-  el.innerHTML = data.map(d => `
-    <div class="card" style="margin-bottom:8px;padding:10px 14px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-weight:500;font-size:13px">${d.proyecto?.nombre || '—'}</span>
-        <span style="font-size:11px;color:var(--text3)">${d.fecha}</span>
-      </div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:4px"><span class="badge b-low">${d.notas || '—'}</span></div>
-      <div style="font-size:12px;color:var(--text2)">${(d.bol_items||[]).map(it=>`${it.cantidad} ${it.unidad} · ${it.material?.referencia||'—'}`).join(' | ')}</div>
-    </div>`).join('');
+  // Flatten rows
+  const rows = [];
+  data.forEach(d => {
+    (d.bol_items || []).forEach(it => {
+      rows.push({
+        fecha: d.fecha, proyecto: d.proyecto?.nombre || '—',
+        ciudad: d.proyecto?.ciudad || '—', estado: d.proyecto?.estado || '—',
+        motivo: d.notas || '—', driver: d.driver || '—',
+        installer: d.installer || '—', tracking: d.tracking || '—',
+        qty: it.cantidad, um: it.unidad,
+        mat: it.material?.referencia || '—',
+        registrado: d.registrado_por?.full_name || '—'
+      });
+    });
+  });
+
+  window._devRows = rows;
+  const totalUnits = rows.reduce((s, r) => s + (r.qty || 0), 0);
+  document.getElementById('dev-stat-count').textContent = rows.length;
+  document.getElementById('dev-stat-units').textContent = totalUnits;
+  document.getElementById('dev-stat-period').textContent = desde && hasta ? desde + ' → ' + hasta : 'All';
+
+  el.innerHTML = `
+    <div class="tbl-wrap">
+      <table style="font-size:12px">
+        <thead><tr>
+          <th>Date</th>
+          <th style="min-width:160px">Project</th>
+          <th>State</th><th>City</th>
+          <th style="text-align:right">Qty</th><th>U/M</th>
+          <th style="min-width:160px">Material</th>
+          <th style="min-width:160px">Return Reason</th>
+          <th>Driver</th><th>Installer</th><th>Tracking</th>
+          <th style="min-width:120px">Registered By</th>
+        </tr></thead>
+        <tbody id="dev-tbody">
+          ${rows.map(r => `<tr>
+            <td>${r.fecha}</td>
+            <td title="${r.proyecto}">${r.proyecto}</td>
+            <td>${r.estado}</td><td>${r.ciudad}</td>
+            <td style="text-align:right;font-weight:600;color:var(--green-text)">+${r.qty}</td>
+            <td>${r.um}</td>
+            <td title="${r.mat}">${r.mat}</td>
+            <td><span class="badge b-low" title="${r.motivo}">${r.motivo.length > 30 ? r.motivo.slice(0,28)+'…' : r.motivo}</span></td>
+            <td>${r.driver}</td><td>${r.installer}</td><td>${r.tracking}</td>
+            <td>${r.registrado}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
+
+window.exportDevCSV = function() {
+  const rows = window._devRows || [];
+  if (!rows.length) { toast('No data to export', 'error'); return; }
+  const desde = document.getElementById('dev-desde')?.value || '';
+  const hasta = document.getElementById('dev-hasta')?.value || '';
+  const headers = ['Date','Project','State','City','Qty','U/M','Material','Return Reason','Driver','Installer','Tracking','Registered By'];
+  const csvRows = [headers.join(',')];
+  rows.forEach(r => {
+    csvRows.push([
+      r.fecha, `"${r.proyecto}"`, r.estado, r.ciudad,
+      r.qty, r.um, `"${r.mat}"`, `"${r.motivo}"`,
+      `"${r.driver}"`, `"${r.installer}"`, r.tracking, `"${r.registrado}"`
+    ].join(','));
+  });
+  const blob = new Blob(['﻿' + csvRows.join('
+')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Returns_${STATE.bodega}_${desde}_${hasta}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+};
 
 window.saveDevolucion = async function() {
   const fecha = document.getElementById('dev-fecha').value;
   const proyecto_id = document.getElementById('dev-proyecto').value || null;
   const driver = document.getElementById('dev-driver').value.trim();
+  const installer = document.getElementById('dev-installer')?.value.trim() || '';
   const tracking = document.getElementById('dev-tracking').value.trim();
   const motivo = document.getElementById('dev-motivo').value;
   const obs = document.getElementById('dev-obs').value.trim();
@@ -2526,7 +2634,7 @@ window.saveDevolucion = async function() {
         proyecto_id,
         driver: driver || 'N/A',
         tracking,
-        carrier: 'DEVOLUCION',
+        carrier: 'DEVOLUCION', installer,
         notas: motivo + (obs ? ' — ' + obs : ''),
         registrado_por: STATE.profile.id
       })
