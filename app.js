@@ -1564,11 +1564,11 @@ window.reprintLastBOL = async function(bolId) {
 window.showEditWO = async function(bolId, wo) {
   if (STATE.profile?.role !== 'admin') { toast('Only admin can edit records', 'error'); return; }
   // Fetch full BOL with items and proyectos list
-  const [{ data: bol }, { data: proyectos }, { data: mats }] = await Promise.all([
+  const [{ data: bol }, { data: proyectos }] = await Promise.all([
     sb.from('bill_of_lading').select('id,fecha,wo_number,tracking,driver,installer,proyecto_id,bol_items(id,cantidad,unidad,material_id,material:materiales(referencia))').eq('id', bolId).single(),
-    sb.from('proyectos').select('id,nombre').eq('activo', true).order('nombre'),
-    getMateriales()
+    sb.from('proyectos').select('id,nombre').eq('activo', true).order('nombre')
   ]);
+  const mats = await getMateriales();
   if (!bol) { toast('Record not found', 'error'); return; }
 
   const itemsHTML = (bol.bol_items || []).map((it, i) => `
@@ -1789,10 +1789,8 @@ window.loadInHistory = async function() {
 
 window.showEditEntrada = async function(id, po, status) {
   if (STATE.profile?.role !== 'admin') { toast('Only admin can edit records', 'error'); return; }
-  const [{ data: entrada }, { data: mats }] = await Promise.all([
-    sb.from('entradas').select('id,fecha,po_number,supplier,status,tracking,observaciones,entradas_items(id,cantidad,unidad,material_id,material:materiales(referencia))').eq('id', id).single(),
-    getMateriales()
-  ]);
+  const { data: entrada } = await sb.from('entradas').select('id,fecha,po_number,supplier,status,tracking,observaciones,entradas_items(id,cantidad,unidad,material_id,material:materiales(referencia))').eq('id', id).single();
+  const mats = await getMateriales();
   if (!entrada) { toast('Record not found', 'error'); return; }
   const statusOpts = ['Complete','Incomplete','Pending'].map(s=>`<option ${s===entrada.status?'selected':''}>${s}</option>`).join('');
   const itemsHTML = (entrada.entradas_items||[]).map((it,i)=>`
@@ -2758,11 +2756,11 @@ async function loadDevHistory() {
 
 window.showEditDevolucion = async function(bolId) {
   if (STATE.profile?.role !== 'admin') { toast('Only admin can edit records', 'error'); return; }
-  const [{ data: bol }, { data: mats }, { data: proyectos }] = await Promise.all([
+  const [{ data: bol }, { data: proyectos }] = await Promise.all([
     sb.from('bill_of_lading').select('id,fecha,notas,driver,installer,tracking,proyecto_id,bol_items(id,cantidad,unidad,material_id,material:materiales(referencia))').eq('id', bolId).single(),
-    getMateriales(),
     sb.from('proyectos').select('id,nombre').eq('activo', true).order('nombre')
   ]);
+  const mats = await getMateriales();
   if (!bol) { toast('Record not found', 'error'); return; }
   const reasonOpts = ['Leftover material return','Wrong material delivered','Damaged material'].map(r=>`<option ${r===bol.notas?'selected':''}>${r}</option>`).join('');
   const itemsHTML = (bol.bol_items||[]).map((it,i)=>`
