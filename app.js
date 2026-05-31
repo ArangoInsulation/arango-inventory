@@ -2122,29 +2122,35 @@ window.showAddMaterial = function() {
           <input type="number" id="nm-min" value="20" min="0">
         </div>
         <div class="field">
-          <label>Unidad Grande <span style="color:var(--text2);font-size:10px">(principal — entradas/salidas)</span></label>
+          <label>Large Unit <span style="color:var(--text2);font-size:10px">(purchase/dispatch unit)</span></label>
           <select id="nm-ug">
-            <option value="">— Solo unidad base —</option>
+            <option value="">— Same as base —</option>
             ${unidades.map(u=>`<option value="${u}">${u}</option>`).join('')}
           </select>
         </div>
         <div class="field">
-          <label>Unidad Base <span style="color:var(--text2);font-size:10px">(mínima — almacenada en inventario)</span></label>
+          <label>Base Unit <span style="color:var(--text2);font-size:10px">(stored in inventory)</span></label>
           <select id="nm-ub">
             ${unidades.map(u=>`<option value="${u}">${u}</option>`).join('')}
           </select>
         </div>
         <div class="field">
-          <label>Factor de conversión</label>
+          <label>Min Unit <span style="color:var(--text2);font-size:10px">(smallest selectable — e.g. BAG)</span></label>
+          <select id="nm-ubmin">
+            ${unidades.map(u=>`<option value="${u}">${u}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Conversion Factor <span style="color:var(--text2);font-size:10px">(1 large = ? base units)</span></label>
           <input type="number" id="nm-factor" value="1" min="1">
         </div>
         <div class="field">
-          <label>Descripción</label>
-          <input type="text" id="nm-desc" placeholder="ej. 1 BUNDLE = 4 BAGS">
+          <label>Conversion Description</label>
+          <input type="text" id="nm-desc" placeholder="e.g. 1 BUNDLE = 4 BAGS">
         </div>
       </div>
       <div style="background:var(--bg2);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--text2)">
-        <i class="ti ti-info-circle"></i> Solo se podrán seleccionar <strong>Unidad Grande</strong> o <strong>Unidad Base</strong> al registrar movimientos. No se podrán usar otras unidades.
+        <i class="ti ti-info-circle"></i> At dispatch/receiving, users can select <strong>Large Unit</strong>, <strong>Base Unit</strong>, or <strong>Min Unit</strong>. The system converts automatically to Base Unit for storage.
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" id="nm-save-btn" onclick="saveMaterial(this)"><i class="ti ti-device-floppy"></i> Guardar</button>
@@ -2162,14 +2168,15 @@ window.saveMaterial = async function(btn) {
     const min = parseInt(document.getElementById('nm-min')?.value) || 0;
     const ug = document.getElementById('nm-ug')?.value || null;
     const ub = document.getElementById('nm-ub')?.value;
+    const ubmin = document.getElementById('nm-ubmin')?.value || ub;
     const factor = parseInt(document.getElementById('nm-factor')?.value) || 1;
-    const desc = document.getElementById('nm-desc')?.value.trim() || ('1 ' + (ug||ub) + ' = ' + factor + ' ' + ub);
+    const desc = document.getElementById('nm-desc')?.value.trim() || ('1 ' + (ug||ub) + ' = ' + factor + ' ' + ubmin);
     if (!ref) { toast('Enter material reference', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
     if (!ub) { toast('Select a base unit', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
     const { data, error } = await sb.from('materiales').insert({
       referencia: ref, categoria: cat || null, stock_minimo: min,
       unidad_base: ug || ub, unidad_grande: ug || null,
-      unidad_base_minima: ub, factor_conversion: factor,
+      unidad_base_minima: ubmin, factor_conversion: factor,
       descripcion_conversion: desc, activo: true
     }).select();
     if (error) throw error;

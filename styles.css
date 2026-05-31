@@ -336,8 +336,14 @@ input:focus, select:focus, textarea:focus {
 .badge-pm { background: var(--blue-light); color: var(--blue-text); }
 
 /* ── Tabla ───────────────────────────────────────────────── */
-.tbl-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+  position: relative;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+}
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 th {
   text-align: left;
   padding: 9px 10px;
@@ -349,8 +355,16 @@ th {
   white-space: nowrap;
   position: sticky;
   top: 0;
+  z-index: 3;
   text-transform: uppercase;
   letter-spacing: .04em;
+}
+th:first-child {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  background: var(--bg2);
 }
 td {
   padding: 9px 10px;
@@ -359,8 +373,17 @@ td {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 200px;
+  background: var(--bg);
+}
+td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+  border-right: 0.5px solid var(--border);
 }
 tr:hover td { background: var(--blue-light); }
+tr:hover td:first-child { background: var(--blue-light); }
 
 /* ── Alertas ─────────────────────────────────────────────── */
 .alert {
