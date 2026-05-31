@@ -760,11 +760,14 @@ async function renderBOL() {
           </div>
           <div class="field"><label>WO #</label><input type="text" id="b-wo" placeholder="ej. 3073180"></div>
           <div class="field"><label>Tracking #</label><input type="text" id="b-tracking" placeholder="ej. 163"></div>
-          <div class="field"><label>Driver / Installer</label>
+          <div class="field"><label>Driver</label>
             <select id="b-driver">
-              <option value="">Seleccionar...</option>
+              <option value="">Select...</option>
               ${instaladores.map(i => `<option>${i}</option>`).join('')}
             </select>
+          </div>
+          <div class="field"><label>Installer</label>
+            <input type="text" id="b-installer" placeholder="Installer name (optional)">
           </div>
           <div class="field"><label>Fecha</label><input type="date" id="b-fecha" value="${new Date().toISOString().slice(0,10)}"></div>
           <div class="field"><label>Working Hours</label><input type="text" id="b-working-hours" placeholder="ej. 8"></div>
@@ -779,7 +782,7 @@ async function renderBOL() {
           </select>
           <input type="number" id="b-qty" placeholder="Qty" min="1" style="width:65px">
           <select id="b-um" style="width:85px">
-            <option>BUNDLE</option><option>BAG</option><option>UNIDAD</option><option>CAJA</option><option>SET</option>
+            <option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>BOX</option><option>SET</option>
           </select>
           <button class="btn btn-primary" onclick="addBolItem()" style="flex:none"><i class="ti ti-plus"></i></button>
         </div>
@@ -816,6 +819,8 @@ async function renderBOL() {
               <div>
                 <div style="font-size:10px;color:var(--text2);font-weight:500">DRIVER</div>
                 <div id="p-driver" style="font-weight:500">—</div>
+                <div style="font-size:10px;color:var(--text2);font-weight:500;margin-top:4px">INSTALLER</div>
+                <div id="p-installer" style="font-weight:500">—</div>
                 <div style="color:var(--text2);font-size:11px">WO: <span id="p-wo">—</span></div>
                 <div style="font-size:10px;color:var(--text2);font-weight:500;margin-top:6px">PM</div>
                 <div id="p-pm-preview" style="font-size:11px">—</div>
@@ -839,7 +844,7 @@ async function renderBOL() {
     </div>
     `);
 
-    ['b-proj','b-wo','b-tracking','b-driver','b-fecha'].forEach(id => {
+    ['b-proj','b-wo','b-tracking','b-driver','b-installer','b-fecha'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', updateBOLPreview);
     });
@@ -867,7 +872,7 @@ window.autocompleteBOL = function(sel) {
 
 // Helper: get valid units for a material
 function getUnidadesForMaterial(mat) {
-  if (!mat) return ['BUNDLE','BAG','UNIDAD','CAJA','ROLLO','SET'];
+  if (!mat) return ['BUNDLE','BAG','UNIT','BOX','ROLL','SET'];
   const units = [];
   const ug = mat.unidad_grande || mat.unidad_base;
   const ub = mat.unidad_base_minima || mat.unidad_base;
@@ -979,6 +984,7 @@ function updateBOLPreview() {
   const projName = projSel?.options[projSel.selectedIndex]?.text || '—';
   s('p-proj', projName !== 'Seleccionar...' ? projName : '—');
   s('p-driver', g('b-driver'));
+  s('p-installer', g('b-installer'));
   s('p-wo', g('b-wo'));
   s('p-fecha', g('b-fecha'));
   s('p-compania', g('b-compania'));
@@ -995,16 +1001,17 @@ function updateBOLPreview() {
 window.saveBOL = async function() {
   const proj = document.getElementById('b-proj').value;
   const driver = document.getElementById('b-driver').value;
+  const installer = document.getElementById('b-installer').value.trim();
   const wo = document.getElementById('b-wo').value;
   const tracking = document.getElementById('b-tracking').value;
   const fecha = document.getElementById('b-fecha').value;
   const pm_text = document.getElementById('b-pm-text').value;
-  if (!proj || !driver || bolItems.length === 0) {
-    toast('Completa proyecto, driver y agrega materiales', 'error'); return;
+  if (!proj || bolItems.length === 0) {
+    toast('Complete project and add materials', 'error'); return;
   }
   try {
     const { data: bol, error } = await sb.from('bill_of_lading')
-      .insert({ bodega: STATE.bodega, fecha, proyecto_id: proj, wo_number: wo, tracking, driver, notas: pm_text, registrado_por: STATE.profile.id })
+      .insert({ bodega: STATE.bodega, fecha, proyecto_id: proj, wo_number: wo, tracking, driver, installer, notas: pm_text, registrado_por: STATE.profile.id })
       .select().single();
     if (error) throw error;
     const items = bolItems.map(i => ({ bol_id: bol.id, material_id: i.material_id, cantidad: i.cantidad, unidad: i.unidad }));
@@ -1040,11 +1047,12 @@ window.printBOL = function() {
     Tennessee: 'Tennessee'
   };
 
+  const driver = document.getElementById('b-driver')?.value || '';
+  const installer = document.getElementById('b-installer')?.value || '';
+
   const itemsHTML = bolItems.length
     ? bolItems.map(it => `<tr><td style="text-align:center;border:1px solid #ccc;padding:4px">${it.cantidad}</td><td style="text-align:center;border:1px solid #ccc;padding:4px">${it.unidad}</td><td style="border:1px solid #ccc;padding:4px">${it.referencia}</td><td style="border:1px solid #ccc;padding:4px"></td></tr>`).join('')
     : '';
-
-  // Fill empty rows to have at least 15
   const emptyRows = Math.max(0, 15 - bolItems.length);
   const emptyHTML = Array(emptyRows).fill('<tr><td style="border:1px solid #ccc;padding:4px;height:22px"></td><td style="border:1px solid #ccc;padding:4px"></td><td style="border:1px solid #ccc;padding:4px"></td><td style="border:1px solid #ccc;padding:4px"></td></tr>').join('');
 
@@ -1054,7 +1062,7 @@ window.printBOL = function() {
   modal.innerHTML = `
     <div style="max-width:900px;margin:0 auto;background:#fff;padding:16px;border-radius:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <span style="font-size:14px;font-weight:500;color:#333">Bill of Lading — Vista previa</span>
+        <span style="font-size:14px;font-weight:500;color:#333">Bill of Lading — Preview</span>
         <div style="display:flex;gap:8px">
           <button onclick="window.print()" style="background:#2B2B7B;color:#fff;border:none;padding:8px 18px;cursor:pointer;border-radius:6px;font-size:13px">🖨 Imprimir / Guardar PDF</button>
           <button onclick="document.getElementById('bol-modal').remove()" style="background:#eee;border:none;padding:8px 14px;cursor:pointer;border-radius:6px;font-size:13px">✕ Cerrar</button>
@@ -1129,16 +1137,16 @@ window.printBOL = function() {
               </div>
             </td>
             <td style="width:50%;vertical-align:top">
-              <div style="background:#2B2B7B;color:#fff;font-weight:bold;padding:4px 8px;text-align:center;letter-spacing:1px;font-size:11px">DRIVER TO / INSTALLER</div>
+              <div style="background:#2B2B7B;color:#fff;font-weight:bold;padding:4px 8px;text-align:center;letter-spacing:1px;font-size:11px">DRIVER / INSTALLER</div>
               <div style="padding:8px">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
                   <div>
-                    <div style="font-size:10px;color:#666;margin-bottom:2px">Driver / Installer</div>
-                    <div style="font-weight:bold;font-size:13px">${document.getElementById('b-driver')?.value||''}</div>
+                    <div style="font-size:10px;color:#666;margin-bottom:2px">Driver</div>
+                    <div style="font-weight:bold;font-size:13px">${driver}</div>
                   </div>
                   <div>
-                    <div style="font-size:10px;color:#666;margin-bottom:2px">Supervisor / PM</div>
-                    <div style="font-size:12px">${proy.pm_nombre||document.getElementById('b-pm-text')?.value||''}</div>
+                    <div style="font-size:10px;color:#666;margin-bottom:2px">Installer</div>
+                    <div style="font-weight:bold;font-size:13px">${installer}</div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;margin-bottom:6px;font-size:11px">
@@ -1195,7 +1203,7 @@ window.printBOL = function() {
             <td style="width:50%;vertical-align:top">
               <div style="background:#2B2B7B;color:#fff;font-weight:bold;padding:4px 8px;text-align:center;font-size:11px;margin-bottom:8px">DRIVER / INSTALLER</div>
               <div style="padding:6px 10px">
-                ${['Time of arrival at the project','Driver Name','Unloading Time','Signature of Receipt'].map(l=>`
+                ${['Time of Arrival at Project','Driver Name','Installer Name','Unloading Time','Signature of Receipt'].map(l=>`
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px">
                   <span style="font-weight:bold;color:#2B2B7B;min-width:160px">${l}:</span>
                   <span style="flex:1;border-bottom:1px solid #000;min-height:18px;display:block"></span>
@@ -1263,7 +1271,7 @@ async function renderRecepcion() {
             ${materiales.map(m => `<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
           </select>
           <input type="number" id="i-qty" placeholder="Qty" min="1" style="width:65px">
-          <select id="i-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIDAD</option><option>CAJA</option></select>
+          <select id="i-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>BOX</option></select>
           <button class="btn btn-primary" onclick="addInItem()" style="flex:none"><i class="ti ti-plus"></i></button>
         </div>
         <div id="i-um-hint" style="font-size:11px;color:var(--text2);margin-bottom:4px;min-height:16px"></div>
@@ -1365,7 +1373,7 @@ async function renderOutput() {
     setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`);
     const { data, count } = await sb.from('bill_of_lading')
       .select(`
-        id, fecha, wo_number, tracking, driver, notas, created_at,
+        id, fecha, wo_number, tracking, driver, installer, notas, created_at,
         registrado_por:profiles!registrado_por(full_name),
         proyecto:proyectos(nombre, ciudad, estado, compania, pm_nombre, direccion),
         bol_items(cantidad, unidad, es_devolucion, material:materiales(referencia))
@@ -1393,8 +1401,9 @@ async function renderOutput() {
           pro: 'WAREHOUSE',
           tracking: b.tracking || '—',
           driver: b.driver || '—',
+          installer: b.installer || '—',
           registrado: b.registrado_por?.full_name || '—',
-          devolucion: it.es_devolucion ? 'Sí' : 'No'
+          devolucion: it.es_devolucion ? 'Yes' : 'No'
         });
       });
     });
@@ -1411,22 +1420,23 @@ async function renderOutput() {
       <div class="tbl-wrap">
         <table style="font-size:11px">
           <thead><tr>
-            <th>Fecha</th>
+            <th>Date</th>
             <th>WO</th>
-            <th style="min-width:140px">Proyecto</th>
+            <th style="min-width:140px">Project</th>
             <th style="min-width:120px">Project Manager</th>
-            <th style="min-width:130px">Compañía</th>
-            <th>Estado</th>
-            <th>Ciudad</th>
+            <th style="min-width:130px">Company</th>
+            <th>State</th>
+            <th>City</th>
             <th style="text-align:right">Qty</th>
             <th>U/M</th>
             <th style="min-width:160px">Material</th>
             <th>PRO</th>
             <th>Tracking</th>
-            <th style="min-width:130px">Driver / Installer</th>
-            <th style="min-width:120px">Registrado por</th>
-            <th>Devolución</th>
-            <th>Editar WO</th>
+            <th style="min-width:100px">Driver</th>
+            <th style="min-width:100px">Installer</th>
+            <th style="min-width:120px">Registered By</th>
+            <th>Return</th>
+            <th>Edit WO</th>
           </tr></thead>
           <tbody id="output-body">
             ${(() => {
@@ -1448,6 +1458,7 @@ async function renderOutput() {
                   <td>${r.pro}</td>
                   <td>${r.tracking}</td>
                   <td title="${r.driver}">${r.driver}</td>
+                  <td title="${r.installer||''}">${r.installer||'—'}</td>
                   <td title="${r.registrado}">${r.registrado}</td>
                   <td>${r.devolucion}</td>
                   <td>${showEdit ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditWO('${r.bol_id}','${r.wo === '—' ? '' : r.wo}')"><i class="ti ti-edit"></i></button>` : ''}</td>
@@ -1501,7 +1512,7 @@ window.exportOutputExcel = function() {
   const rows = window._outputRows || [];
   if (!rows.length) { toast('No hay datos para exportar', 'error'); return; }
 
-  const headers = ['Fecha','WO','Proyecto','Project Manager','Compañía','Estado','Ciudad','Qty','U/M','Material','PRO','Tracking','Driver / Installer','Registrado por','Devolución'];
+  const headers = ['Date','WO','Project','Project Manager','Company','State','City','Qty','U/M','Material','PRO','Tracking','Driver','Installer','Registered By','Return'];
   const csvRows = [headers.join(',')];
   rows.forEach(r => {
     csvRows.push([
@@ -1509,7 +1520,7 @@ window.exportOutputExcel = function() {
       `"${r.proyecto}"`, `"${r.pm}"`, `"${r.compania}"`,
       r.estado, r.ciudad, r.qty, r.um,
       `"${r.mat}"`, r.pro, r.tracking,
-      `"${r.driver}"`, `"${r.registrado}"`, r.devolucion
+      `"${r.driver}"`, `"${r.installer||''}"`, `"${r.registrado}"`, r.devolucion
     ].join(','));
   });
 
@@ -1604,10 +1615,10 @@ window.loadInHistory = async function() {
     <div class="tbl-wrap">
       <table style="font-size:12px">
         <thead><tr>
-          <th>Fecha</th><th>PO Number</th><th>Proveedor</th><th>Estado</th>
+          <th>Date</th><th>PO Number</th><th>Supplier</th><th>State</th>
           <th>Tracking</th><th style="text-align:right">Qty</th><th>U/M</th>
-          <th style="min-width:160px">Material</th><th style="min-width:180px">Observaciones</th>
-          <th>Registrado por</th><th>Editar</th>
+          <th style="min-width:160px">Material</th><th style="min-width:180px">Notes</th>
+          <th>Registered By</th><th>Edit</th>
         </tr></thead>
         <tbody>
           ${rows.map(r => {
@@ -1677,7 +1688,7 @@ window.saveEditEntrada = async function(id) {
 window.exportInExcel = function() {
   const rows = window._inRows || [];
   if (!rows.length) { toast('No hay datos para exportar', 'error'); return; }
-  const headers = ['Fecha','PO Number','Proveedor','Estado','Tracking','Qty','U/M','Material','Observaciones','Registrado por'];
+  const headers = ['Date','PO Number','Supplier','State','Tracking','Qty','U/M','Material','Notes','Registered By'];
   const csvRows = [headers.join(',')];
   rows.forEach(r => {
     csvRows.push([
@@ -1959,12 +1970,12 @@ window.showEditMaterial = function(id, ref, ub, ug, factor, minimo) {
         </div>
         <div class="field"><label>Unidad base <span style="font-size:10px;color:var(--text3)">(inventario siempre en esta unidad)</span></label>
           <select id="em-ub">
-            ${['BAG','BUNDLE','UNIT','SET','TUBO','ROLLO','PACK','CAJA','PAR','LAMINA'].map(u=>`<option ${u===ub?'selected':''}>${u}</option>`).join('')}
+            ${['BAG','BUNDLE','UNIT','SET','TUBE','ROLL','PACK','BOX','PAR','SHEET'].map(u=>`<option ${u===ub?'selected':''}>${u}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Unidad grande <span style="font-size:10px;color:var(--text3)">(presentación de compra/despacho)</span></label>
           <select id="em-ug">
-            ${['BUNDLE','CAJA','PACK','ROLLO','PALLET','SET','PAR','UNIDAD','BAG'].map(u=>`<option ${u===ug?'selected':''}>${u}</option>`).join('')}
+            ${['BUNDLE','BOX','PACK','ROLL','PALLET','SET','PAR','UNIT','BAG'].map(u=>`<option ${u===ug?'selected':''}>${u}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Factor de conversión <span style="font-size:10px;color:var(--text3)">(1 unidad grande = ? unidades base)</span></label>
@@ -2025,7 +2036,7 @@ window.deactivateMaterial = async function(id, ref) {
 window.showAddMaterial = function() {
   const el = document.getElementById('mat-form-area');
   if (!el) return;
-  const unidades = ['BUNDLE','BAG','CAJA','PAQUETE','UNIDAD','ROLLO','SET','TUBO','LAMINA','BOLSA','PALLET','PAR','TARRO','CAJITA','PACK'];
+  const unidades = ['BUNDLE','BAG','BOX','PACKAGE','UNIT','ROLL','SET','TUBE','SHEET','PALLET','PAR','JAR','PACK'];
   const categorias = ['BATT','MINERAL WOOL','BLOW','SPRAY FOAM','CONSUMIBLE'];
   el.innerHTML = `
     <div class="card" style="max-width:620px;margin-bottom:16px">
@@ -2324,7 +2335,7 @@ async function renderDevoluciones() {
               ${materiales.map(m=>`<option value="${m.id}" data-ref="${m.referencia}">${m.referencia}</option>`).join('')}
             </select>
             <input type="number" id="dev-qty" placeholder="Qty" min="1" style="width:65px">
-            <select id="dev-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIDAD</option><option>CAJA</option></select>
+            <select id="dev-um" style="width:85px"><option>BUNDLE</option><option>BAG</option><option>UNIT</option><option>BOX</option></select>
             <button class="btn btn-primary" onclick="addDevItem()" style="flex:none"><i class="ti ti-plus"></i></button>
           </div>
           <div id="dev-um-hint" style="font-size:11px;color:var(--text2);margin-bottom:4px;min-height:16px"></div>
