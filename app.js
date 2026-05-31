@@ -1023,17 +1023,20 @@ window.saveBOL = async function() {
     const { error: ie } = await sb.from('bol_items').insert(items);
     if (ie) throw ie;
     bolItems = [];
-    toast('Bill of Lading guardado. Inventario actualizado.');
+    toast('Bill of Lading saved. Inventory updated.');
     invalidateStockCache(STATE.bodega);
+    // Store saved BOL id for reprint
+    window._lastSavedBolId = bol.id;
     setContent(`
       <div style="text-align:center;padding:40px">
         <div style="width:56px;height:56px;border-radius:50%;background:var(--green-light);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:24px;color:var(--green-text)"><i class="ti ti-check"></i></div>
-        <div style="font-size:16px;font-weight:500;margin-bottom:6px">Bill of Lading guardado</div>
-        <div style="font-size:13px;color:var(--text2);margin-bottom:20px">OUTPUT e inventario de ${STATE.bodega} actualizados.</div>
-        <div style="display:flex;gap:8px;justify-content:center">
-          <button class="btn btn-primary" onclick="navigateTo('bol')"><i class="ti ti-plus"></i> Nuevo BOL</button>
-          <button class="btn" onclick="navigateTo('stock')"><i class="ti ti-package"></i> Ver stock</button>
-          <button class="btn" onclick="navigateTo('output')"><i class="ti ti-arrow-up-right"></i> Ver OUTPUT</button>
+        <div style="font-size:16px;font-weight:500;margin-bottom:6px">Bill of Lading Saved</div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:20px">OUTPUT and ${STATE.bodega} inventory updated.</div>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="reprintLastBOL()"><i class="ti ti-printer"></i> Reprint BOL</button>
+          <button class="btn" onclick="navigateTo('bol')"><i class="ti ti-plus"></i> New BOL</button>
+          <button class="btn" onclick="navigateTo('stock')"><i class="ti ti-package"></i> View Stock</button>
+          <button class="btn" onclick="navigateTo('output')"><i class="ti ti-arrow-up-right"></i> View OUTPUT</button>
         </div>
       </div>`);
   } catch (e) { toast(e.message, 'error'); }
@@ -1458,7 +1461,8 @@ async function renderOutput() {
             <th style="min-width:100px">Installer</th>
             <th style="min-width:120px">Registered By</th>
             <th>Return</th>
-            <th>Edit WO</th>
+            <th>Edit</th>
+            <th>Reprint</th>
           </tr></thead>
           <tbody id="output-body">
             ${(() => {
@@ -1483,7 +1487,8 @@ async function renderOutput() {
                   <td title="${r.installer||''}">${r.installer||'—'}</td>
                   <td title="${r.registrado}">${r.registrado}</td>
                   <td>${r.devolucion}</td>
-                  <td>${showEdit ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditWO('${r.bol_id}','${r.wo === '—' ? '' : r.wo}')"><i class="ti ti-edit"></i></button>` : ''}</td>
+                  <td>${showEdit ? `<button class="btn" style="padding:3px 8px;font-size:11px" title="Edit" onclick="showEditWO('${r.bol_id}','${r.wo === '—' ? '' : r.wo}')"><i class="ti ti-edit"></i></button>` : ''}</td>
+                  <td>${showEdit ? `<button class="btn" style="padding:3px 8px;font-size:11px" title="Reprint BOL" onclick="reprintLastBOL('${r.bol_id}')"><i class="ti ti-printer"></i></button>` : ''}</td>
                 </tr>`;
               }).join('');
             })()}
@@ -1500,34 +1505,150 @@ async function renderOutput() {
   load();
 }
 
-window.showEditWO = function(bolId, wo) {
-  document.getElementById('edit-wo-modal')?.remove();
-  const modal = document.createElement('div');
-  modal.id = 'edit-wo-modal';
-  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center';
-  modal.innerHTML = `
-    <div style="background:var(--bg);border-radius:var(--radius-lg);padding:24px;max-width:380px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,0.2)">
-      <div style="font-size:15px;font-weight:500;margin-bottom:16px">Editar WO #</div>
-      <div class="field">
-        <label>WO Number</label>
-        <input type="text" id="edit-wo-input" value="${wo}" placeholder="ej. 3073180">
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-primary" onclick="saveEditWO('${bolId}')"><i class="ti ti-device-floppy"></i> Guardar</button>
-        <button class="btn" onclick="document.getElementById('edit-wo-modal').remove()">Cancelar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  document.getElementById('edit-wo-input').focus();
+// ── Universal edit modal helper ──────────────────────────────
+function closeEditModal() { document.getElementById('arango-edit-modal')?.remove(); }
+
+function openEditModal(html) {
+  closeEditModal();
+  const m = document.createElement('div');
+  m.id = 'arango-edit-modal';
+  m.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  m.innerHTML = `<div style="background:var(--bg);border-radius:var(--radius-lg);padding:24px;width:100%;max-width:620px;max-height:90vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,0.25)">${html}</div>`;
+  m.addEventListener('click', e => { if (e.target === m) closeEditModal(); });
+  document.body.appendChild(m);
+}
+
+// ── Edit BOL (Output/Salidas) ─────────────────────────────────
+// ── Reprint BOL from saved id ─────────────────────────────
+window.reprintLastBOL = async function(bolId) {
+  const id = bolId || window._lastSavedBolId;
+  if (!id) { toast('No BOL to reprint', 'error'); return; }
+  const { data: bol } = await sb.from('bill_of_lading')
+    .select('id,fecha,wo_number,tracking,driver,installer,notas,bodega,proyecto:proyectos(nombre,ciudad,estado,compania,pm_nombre,direccion),bol_items(cantidad,unidad,material:materiales(referencia))')
+    .eq('id', id).single();
+  if (!bol) { toast('BOL not found', 'error'); return; }
+  // Temporarily populate bolItems and call printBOL
+  const savedItems = bolItems;
+  const savedProy = window._proyCache;
+  bolItems = (bol.bol_items||[]).map(it => ({
+    material_id: null, referencia: it.material?.referencia||'—',
+    cantidad: it.cantidad, unidad: it.unidad,
+    display_qty: it.cantidad, display_um: it.unidad
+  }));
+  // Set form fields temporarily for printBOL to read
+  const tempFields = {
+    'b-driver': bol.driver||'', 'b-installer': bol.installer||'',
+    'b-wo': bol.wo_number||'', 'b-tracking': bol.tracking||'',
+    'b-fecha': bol.fecha, 'b-pm-text': bol.proyecto?.pm_nombre||''
+  };
+  const origVals = {};
+  Object.entries(tempFields).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) { origVals[id] = el.value; el.value = val; }
+  });
+  // Override proy for printBOL
+  window._reprintProy = bol.proyecto;
+  window._reprintBodega = bol.bodega;
+  printBOL();
+  // Restore
+  setTimeout(() => {
+    bolItems = savedItems;
+    Object.entries(origVals).forEach(([id, val]) => {
+      const el = document.getElementById(id); if (el) el.value = val;
+    });
+    delete window._reprintProy;
+    delete window._reprintBodega;
+  }, 500);
 };
 
-window.saveEditWO = async function(bolId) {
-  const wo = document.getElementById('edit-wo-input').value.trim();
-  const { error } = await sb.from('bill_of_lading').update({ wo_number: wo || null }).eq('id', bolId);
-  if (error) { toast(error.message, 'error'); return; }
-  document.getElementById('edit-wo-modal').remove();
-  toast('WO actualizado correctamente');
-  navigateTo('output');
+window.showEditWO = async function(bolId, wo) {
+  if (STATE.profile?.role !== 'admin') { toast('Only admin can edit records', 'error'); return; }
+  // Fetch full BOL with items and proyectos list
+  const [{ data: bol }, { data: proyectos }, { data: mats }] = await Promise.all([
+    sb.from('bill_of_lading').select('id,fecha,wo_number,tracking,driver,installer,proyecto_id,bol_items(id,cantidad,unidad,material_id,material:materiales(referencia))').eq('id', bolId).single(),
+    sb.from('proyectos').select('id,nombre').eq('activo', true).order('nombre'),
+    getMateriales()
+  ]);
+  if (!bol) { toast('Record not found', 'error'); return; }
+
+  const itemsHTML = (bol.bol_items || []).map((it, i) => `
+    <div style="display:grid;grid-template-columns:1fr 80px 90px 32px;gap:6px;margin-bottom:6px;align-items:center" id="bol-edit-item-${i}">
+      <select style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%" id="bei-mat-${i}">
+        ${mats.map(m => `<option value="${m.id}" ${m.id===it.material_id?'selected':''}>${m.referencia}</option>`).join('')}
+      </select>
+      <input type="number" id="bei-qty-${i}" value="${it.cantidad}" min="0.01" step="any" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%">
+      <input type="text" id="bei-um-${i}" value="${it.unidad}" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%">
+      <button onclick="document.getElementById('bol-edit-item-${i}').remove()" style="background:var(--red-light);color:var(--red-text);border:none;border-radius:var(--radius);cursor:pointer;padding:5px 8px;font-size:14px">✕</button>
+    </div>`).join('');
+
+  openEditModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <span style="font-size:16px;font-weight:600;color:var(--navy)"><i class="ti ti-edit"></i> Edit BOL / Output</span>
+      <button onclick="closeEditModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
+    </div>
+    <div class="grid2" style="margin-bottom:12px">
+      <div class="field"><label>Date</label><input type="date" id="bei-fecha" value="${bol.fecha}"></div>
+      <div class="field"><label>WO #</label><input type="text" id="bei-wo" value="${bol.wo_number||''}"></div>
+      <div class="field"><label>Project</label>
+        <select id="bei-proj">
+          ${proyectos.map(p=>`<option value="${p.id}" ${p.id===bol.proyecto_id?'selected':''}>${p.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Tracking</label><input type="text" id="bei-tracking" value="${bol.tracking||''}"></div>
+      <div class="field"><label>Driver</label><input type="text" id="bei-driver" value="${bol.driver||''}"></div>
+      <div class="field"><label>Installer</label><input type="text" id="bei-installer" value="${bol.installer||''}"></div>
+    </div>
+    <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Materials</div>
+    <div id="bol-edit-items">${itemsHTML}</div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-primary" onclick="saveEditBOL('${bolId}', ${(bol.bol_items||[]).length})"><i class="ti ti-device-floppy"></i> Save Changes</button>
+      <button class="btn" onclick="closeEditModal()">Cancel</button>
+    </div>
+    <div style="margin-top:10px;padding:8px 10px;background:var(--amber-light);border-radius:var(--radius);font-size:11px;color:var(--amber-text)">
+      <i class="ti ti-alert-triangle"></i> Admin only — changes update inventory stock automatically.
+    </div>`);
+};
+
+window.saveEditBOL = async function(bolId, originalCount) {
+  const btn = document.querySelector('#arango-edit-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const fecha = document.getElementById('bei-fecha').value;
+    const wo = document.getElementById('bei-wo').value.trim();
+    const projId = document.getElementById('bei-proj').value;
+    const tracking = document.getElementById('bei-tracking').value.trim();
+    const driver = document.getElementById('bei-driver').value.trim();
+    const installer = document.getElementById('bei-installer').value.trim();
+
+    // Collect items from visible rows
+    const newItems = [];
+    for (let i = 0; i < originalCount + 5; i++) {
+      const row = document.getElementById(`bol-edit-item-${i}`);
+      if (!row) continue;
+      const matId = document.getElementById(`bei-mat-${i}`)?.value;
+      const qty = parseFloat(document.getElementById(`bei-qty-${i}`)?.value) || 0;
+      const um = document.getElementById(`bei-um-${i}`)?.value || 'BUNDLE';
+      if (matId && qty > 0) {
+        const mat = (window._materialesCache||[]).find(m=>m.id===matId);
+        newItems.push({ bol_id: bolId, material_id: matId, cantidad: convertToBase(qty,um,mat), unidad: mat?.unidad_base||um });
+      }
+    }
+    if (!newItems.length) { toast('Add at least one material', 'error'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy"></i> Save Changes';} return; }
+
+    const { error: e1 } = await sb.from('bill_of_lading').update({ fecha, wo_number: wo||null, proyecto_id: projId, tracking: tracking||null, driver: driver||null, installer: installer||null }).eq('id', bolId);
+    if (e1) throw e1;
+    await sb.from('bol_items').delete().eq('bol_id', bolId);
+    const { error: e2 } = await sb.from('bol_items').insert(newItems);
+    if (e2) throw e2;
+
+    toast('BOL updated successfully');
+    closeEditModal();
+    window._outputRows = null;
+    loadOutput();
+  } catch(e) {
+    toast(e.message || 'Save failed', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; }
+  }
 };
 
 window.exportOutputExcel = function() {
@@ -1666,45 +1787,86 @@ window.loadInHistory = async function() {
   `);
 };
 
-window.showEditEntrada = function(id, po, status) {
-  // Remove existing modal if any
-  document.getElementById('edit-entrada-modal')?.remove();
-
-  const modal = document.createElement('div');
-  modal.id = 'edit-entrada-modal';
-  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center';
-  modal.innerHTML = `
-    <div style="background:var(--bg);border-radius:var(--radius-lg);padding:24px;max-width:420px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,0.2)">
-      <div style="font-size:15px;font-weight:500;margin-bottom:16px">Editar entrada</div>
-      <div class="field">
-        <label>PO Number <span style="color:var(--red-text)">*</span></label>
-        <input type="text" id="edit-po" value="${po === '—' ? '' : po}" placeholder="ej. AIC-21349">
+window.showEditEntrada = async function(id, po, status) {
+  if (STATE.profile?.role !== 'admin') { toast('Only admin can edit records', 'error'); return; }
+  const [{ data: entrada }, { data: mats }] = await Promise.all([
+    sb.from('entradas').select('id,fecha,po_number,supplier,status,tracking,observaciones,entradas_items(id,cantidad,unidad,material_id,material:materiales(referencia))').eq('id', id).single(),
+    getMateriales()
+  ]);
+  if (!entrada) { toast('Record not found', 'error'); return; }
+  const statusOpts = ['Complete','Incomplete','Pending'].map(s=>`<option ${s===entrada.status?'selected':''}>${s}</option>`).join('');
+  const itemsHTML = (entrada.entradas_items||[]).map((it,i)=>`
+    <div style="display:grid;grid-template-columns:1fr 80px 90px 32px;gap:6px;margin-bottom:6px;align-items:center" id="in-edit-item-${i}">
+      <select style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%" id="iei-mat-${i}">
+        ${mats.map(m=>`<option value="${m.id}" ${m.id===it.material_id?'selected':''}>${m.referencia}</option>`).join('')}
+      </select>
+      <input type="number" id="iei-qty-${i}" value="${it.cantidad}" min="0.01" step="any" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%">
+      <input type="text" id="iei-um-${i}" value="${it.unidad}" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%">
+      <button onclick="document.getElementById('in-edit-item-${i}').remove()" style="background:var(--red-light);color:var(--red-text);border:none;border-radius:var(--radius);cursor:pointer;padding:5px 8px;font-size:14px">✕</button>
+    </div>`).join('');
+  openEditModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <span style="font-size:16px;font-weight:600;color:var(--navy)"><i class="ti ti-edit"></i> Edit Entry / IN</span>
+      <button onclick="closeEditModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
+    </div>
+    <div class="grid2" style="margin-bottom:12px">
+      <div class="field"><label>Date</label><input type="date" id="iei-fecha" value="${entrada.fecha}"></div>
+      <div class="field"><label>PO Number</label><input type="text" id="iei-po" value="${entrada.po_number||''}"></div>
+      <div class="field"><label>Supplier</label><input type="text" id="iei-supplier" value="${entrada.supplier||''}"></div>
+      <div class="field"><label>Status</label><select id="iei-status">${statusOpts}</select></div>
+      <div class="field"><label>Tracking</label><input type="text" id="iei-tracking" value="${entrada.tracking||''}"></div>
+      <div class="field" style="grid-column:1/-1"><label>Notes</label>
+        <textarea id="iei-obs" style="width:100%;padding:6px 8px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;min-height:60px">${entrada.observaciones||''}</textarea>
       </div>
-      <div class="field">
-        <label>Estado</label>
-        <select id="edit-status">
-          <option value="Complete" ${status==='Complete'?'selected':''}>Complete</option>
-          <option value="Incomplete" ${status==='Incomplete'?'selected':''}>Incomplete</option>
-          <option value="Pending" ${status==='Pending'?'selected':''}>Pending</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-primary" onclick="saveEditEntrada('${id}')"><i class="ti ti-device-floppy"></i> Guardar</button>
-        <button class="btn" onclick="document.getElementById('edit-entrada-modal').remove()">Cancelar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
+    </div>
+    <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Materials</div>
+    <div id="in-edit-items">${itemsHTML}</div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-primary" onclick="saveEditEntrada('${id}', ${(entrada.entradas_items||[]).length})"><i class="ti ti-device-floppy"></i> Save Changes</button>
+      <button class="btn" onclick="closeEditModal()">Cancel</button>
+    </div>
+    <div style="margin-top:10px;padding:8px 10px;background:var(--amber-light);border-radius:var(--radius);font-size:11px;color:var(--amber-text)">
+      <i class="ti ti-alert-triangle"></i> Admin only — changes update inventory stock automatically.
+    </div>`);
 };
 
-window.saveEditEntrada = async function(id) {
-  const po = document.getElementById('edit-po').value.trim();
-  const status = document.getElementById('edit-status').value;
-  if (!po) { toast('El PO Number es obligatorio', 'error'); return; }
-  const { error } = await sb.from('entradas').update({ po_number: po, status }).eq('id', id);
-  if (error) { toast(error.message, 'error'); return; }
-  document.getElementById('edit-entrada-modal').remove();
-  toast('Entrada actualizada correctamente');
-  loadInHistory();
+window.saveEditEntrada = async function(id, originalCount) {
+  const btn = document.querySelector('#arango-edit-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const fecha    = document.getElementById('iei-fecha').value;
+    const po       = document.getElementById('iei-po').value.trim();
+    const supplier = document.getElementById('iei-supplier').value.trim();
+    const status   = document.getElementById('iei-status').value;
+    const tracking = document.getElementById('iei-tracking').value.trim();
+    const obs      = document.getElementById('iei-obs').value.trim();
+    if (!po) { toast('PO Number is required', 'error'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy"></i> Save Changes';} return; }
+    const newItems = [];
+    for (let i = 0; i < originalCount + 5; i++) {
+      const row = document.getElementById(`in-edit-item-${i}`);
+      if (!row) continue;
+      const matId = document.getElementById(`iei-mat-${i}`)?.value;
+      const qty   = parseFloat(document.getElementById(`iei-qty-${i}`)?.value) || 0;
+      const um    = document.getElementById(`iei-um-${i}`)?.value || 'BUNDLE';
+      if (matId && qty > 0) {
+        const mat = (window._materialesCache||[]).find(m=>m.id===matId);
+        newItems.push({ entrada_id: id, material_id: matId, cantidad: convertToBase(qty,um,mat), unidad: mat?.unidad_base||um });
+      }
+    }
+    if (!newItems.length) { toast('Add at least one material', 'error'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy"></i> Save Changes';} return; }
+    const { error: e1 } = await sb.from('entradas').update({ fecha, po_number: po, supplier: supplier||null, status, tracking: tracking||null, observaciones: obs||null }).eq('id', id);
+    if (e1) throw e1;
+    await sb.from('entradas_items').delete().eq('entrada_id', id);
+    const { error: e2 } = await sb.from('entradas_items').insert(newItems);
+    if (e2) throw e2;
+    toast('Entry updated successfully');
+    closeEditModal();
+    window._inRows = null;
+    loadInHistory();
+  } catch(e) {
+    toast(e.message || 'Save failed', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; }
+  }
 };
 
 window.exportInExcel = function() {
@@ -2543,6 +2705,7 @@ async function loadDevHistory() {
   data.forEach(d => {
     (d.bol_items || []).forEach(it => {
       rows.push({
+        bol_id: d.id,
         fecha: d.fecha, proyecto: d.proyecto?.nombre || '—',
         ciudad: d.proyecto?.ciudad || '—', estado: d.proyecto?.estado || '—',
         motivo: d.notas || '—', driver: d.driver || '—',
@@ -2572,6 +2735,7 @@ async function loadDevHistory() {
           <th style="min-width:160px">Return Reason</th>
           <th>Driver</th><th>Installer</th><th>Tracking</th>
           <th style="min-width:120px">Registered By</th>
+          <th>Edit</th>
         </tr></thead>
         <tbody id="dev-tbody">
           ${rows.map(r => `<tr>
@@ -2584,12 +2748,96 @@ async function loadDevHistory() {
             <td><span class="badge b-low" title="${r.motivo}">${r.motivo.length > 30 ? r.motivo.slice(0,28)+'…' : r.motivo}</span></td>
             <td>${r.driver}</td><td>${r.installer}</td><td>${r.tracking}</td>
             <td>${r.registrado}</td>
+            <td>${STATE.profile?.role==='admin' ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditDevolucion('${r.bol_id}')"><i class="ti ti-edit"></i></button>` : ''}</td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
 }
 
+
+window.showEditDevolucion = async function(bolId) {
+  if (STATE.profile?.role !== 'admin') { toast('Only admin can edit records', 'error'); return; }
+  const [{ data: bol }, { data: mats }, { data: proyectos }] = await Promise.all([
+    sb.from('bill_of_lading').select('id,fecha,notas,driver,installer,tracking,proyecto_id,bol_items(id,cantidad,unidad,material_id,material:materiales(referencia))').eq('id', bolId).single(),
+    getMateriales(),
+    sb.from('proyectos').select('id,nombre').eq('activo', true).order('nombre')
+  ]);
+  if (!bol) { toast('Record not found', 'error'); return; }
+  const reasonOpts = ['Leftover material return','Wrong material delivered','Damaged material'].map(r=>`<option ${r===bol.notas?'selected':''}>${r}</option>`).join('');
+  const itemsHTML = (bol.bol_items||[]).map((it,i)=>`
+    <div style="display:grid;grid-template-columns:1fr 80px 90px 32px;gap:6px;margin-bottom:6px;align-items:center" id="dev-edit-item-${i}">
+      <select style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%" id="dei-mat-${i}">
+        ${mats.map(m=>`<option value="${m.id}" ${m.id===it.material_id?'selected':''}>${m.referencia}</option>`).join('')}
+      </select>
+      <input type="number" id="dei-qty-${i}" value="${it.cantidad}" min="0.01" step="any" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%">
+      <input type="text" id="dei-um-${i}" value="${it.unidad}" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:var(--radius);width:100%">
+      <button onclick="document.getElementById('dev-edit-item-${i}').remove()" style="background:var(--red-light);color:var(--red-text);border:none;border-radius:var(--radius);cursor:pointer;padding:5px 8px;font-size:14px">✕</button>
+    </div>`).join('');
+  openEditModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <span style="font-size:16px;font-weight:600;color:var(--navy)"><i class="ti ti-edit"></i> Edit Return / Devolucion</span>
+      <button onclick="closeEditModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
+    </div>
+    <div class="grid2" style="margin-bottom:12px">
+      <div class="field"><label>Date</label><input type="date" id="dei-fecha" value="${bol.fecha}"></div>
+      <div class="field"><label>Project</label>
+        <select id="dei-proj">
+          ${proyectos.map(p=>`<option value="${p.id}" ${p.id===bol.proyecto_id?'selected':''}>${p.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Driver</label><input type="text" id="dei-driver" value="${bol.driver||''}"></div>
+      <div class="field"><label>Installer</label><input type="text" id="dei-installer" value="${bol.installer||''}"></div>
+      <div class="field"><label>Tracking</label><input type="text" id="dei-tracking" value="${bol.tracking||''}"></div>
+      <div class="field"><label>Return Reason</label><select id="dei-motivo">${reasonOpts}</select></div>
+    </div>
+    <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Materials</div>
+    <div id="dev-edit-items">${itemsHTML}</div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-primary" onclick="saveEditDevolucion('${bolId}', ${(bol.bol_items||[]).length})"><i class="ti ti-device-floppy"></i> Save Changes</button>
+      <button class="btn" onclick="closeEditModal()">Cancel</button>
+    </div>
+    <div style="margin-top:10px;padding:8px 10px;background:var(--amber-light);border-radius:var(--radius);font-size:11px;color:var(--amber-text)">
+      <i class="ti ti-alert-triangle"></i> Admin only — changes update inventory stock automatically.
+    </div>`);
+};
+
+window.saveEditDevolucion = async function(bolId, originalCount) {
+  const btn = document.querySelector('#arango-edit-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const fecha     = document.getElementById('dei-fecha').value;
+    const projId    = document.getElementById('dei-proj').value;
+    const driver    = document.getElementById('dei-driver').value.trim();
+    const installer = document.getElementById('dei-installer').value.trim();
+    const tracking  = document.getElementById('dei-tracking').value.trim();
+    const motivo    = document.getElementById('dei-motivo').value;
+    const newItems = [];
+    for (let i = 0; i < originalCount + 5; i++) {
+      const row = document.getElementById(`dev-edit-item-${i}`);
+      if (!row) continue;
+      const matId = document.getElementById(`dei-mat-${i}`)?.value;
+      const qty   = parseFloat(document.getElementById(`dei-qty-${i}`)?.value) || 0;
+      const um    = document.getElementById(`dei-um-${i}`)?.value || 'BUNDLE';
+      if (matId && qty > 0) {
+        const mat = (window._materialesCache||[]).find(m=>m.id===matId);
+        newItems.push({ bol_id: bolId, material_id: matId, cantidad: convertToBase(qty,um,mat), unidad: mat?.unidad_base||um, es_devolucion: true });
+      }
+    }
+    if (!newItems.length) { toast('Add at least one material', 'error'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy"></i> Save Changes';} return; }
+    const { error: e1 } = await sb.from('bill_of_lading').update({ fecha, proyecto_id: projId, driver: driver||null, installer: installer||null, tracking: tracking||null, notas: motivo }).eq('id', bolId);
+    if (e1) throw e1;
+    await sb.from('bol_items').delete().eq('bol_id', bolId);
+    const { error: e2 } = await sb.from('bol_items').insert(newItems);
+    if (e2) throw e2;
+    toast('Return updated successfully');
+    closeEditModal();
+    loadDevHistory();
+  } catch(e) {
+    toast(e.message || 'Save failed', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; }
+  }
+};
 window.exportDevCSV = function() {
   const rows = window._devRows || [];
   if (!rows.length) { toast('No data to export', 'error'); return; }
