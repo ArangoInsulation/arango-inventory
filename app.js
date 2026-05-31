@@ -873,21 +873,26 @@ window.autocompleteBOL = function(sel) {
 // Helper: get valid units for a material
 function getUnidadesForMaterial(mat) {
   if (!mat) return ['BUNDLE','BAG','UNIT','BOX','ROLL','SET'];
-  const units = [];
-  const ug = mat.unidad_grande || mat.unidad_base;
-  const ub = mat.unidad_base_minima || mat.unidad_base;
-  if (ug) units.push(ug);
-  if (ub && ub !== ug && ub !== '—') units.push(ub);
-  return units.length ? units : [mat.unidad_base];
+  const units = new Set();
+  if (mat.unidad_base)        units.add(mat.unidad_base);
+  if (mat.unidad_grande)      units.add(mat.unidad_grande);
+  if (mat.unidad_base_minima) units.add(mat.unidad_base_minima);
+  return [...units].filter(Boolean);
 }
 
 // Helper: convert qty to base units
 function convertToBase(qty, unidad, mat) {
-  if (!mat || !mat.unidad_grande) return qty;
-  const ug = mat.unidad_grande;
+  if (!mat) return qty;
+  const ub    = mat.unidad_base        || '';   // e.g. BUNDLE (stored unit)
+  const ug    = mat.unidad_grande      || '';   // e.g. BUNDLE (large/purchase unit)
+  const ubmin = mat.unidad_base_minima || '';   // e.g. BAG    (smallest unit)
   const factor = mat.factor_conversion || 1;
-  // If user selected the grande unit, multiply by factor
-  if (unidad === ug) return qty * factor;
+  // Same unit as base → no conversion needed
+  if (unidad === ub) return qty;
+  // Large unit selected and it's different from base → multiply (e.g. BOX → UNITS)
+  if (ug && unidad === ug && ug !== ub) return qty * factor;
+  // Min unit selected and it's different from base → divide (e.g. BAG → BUNDLE)
+  if (ubmin && unidad === ubmin && ubmin !== ub && factor > 1) return qty / factor;
   return qty;
 }
 
@@ -1964,7 +1969,7 @@ async function renderMaterialesAdmin() {
             <td style="font-size:11px;color:var(--text2)">${m.descripcion_conversion||'—'}</td>
             <td style="text-align:right">${m.stock_minimo}</td>
             <td>
-              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditMaterial('${m.id}','${m.referencia.replace(/'/g,"\\'")}','${m.unidad_base||'BUNDLE'}','${m.unidad_grande||''}',${m.factor_conversion||1},${m.stock_minimo})">
+              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditMaterial('${m.id}','${m.referencia.replace(/'/g,"\\'")}','${m.unidad_base||'BUNDLE'}','${m.unidad_grande||''}','${m.unidad_base_minima||m.unidad_base||'BAG'}',${m.factor_conversion||1},${m.stock_minimo})">
                 <i class="ti ti-edit"></i> Editar
               </button>
             </td>
@@ -1974,7 +1979,7 @@ async function renderMaterialesAdmin() {
     </div>`);
 }
 
-window.showEditMaterial = async function(id, ref, ub, ug, factor, minimo) {
+window.showEditMaterial = async function(id, ref, ub, ug, ubmin, factor, minimo) {
   const el = document.getElementById('mat-form-area');
   if (!el) return;
   // Load per-bodega minimums
@@ -1992,12 +1997,17 @@ window.showEditMaterial = async function(id, ref, ub, ug, factor, minimo) {
         </div>
         <div class="field"><label>Base Unit <span style="font-size:10px;color:var(--text3)">(stored in inventory)</span></label>
           <select id="em-ub">
-            ${['BAG','BUNDLE','UNIT','SET','TUBE','ROLL','PACK','BOX','PAR','SHEET'].map(u=>`<option ${u===ub?'selected':''}>${u}</option>`).join('')}
+            ${['BAG','BUNDLE','UNIT','SET','TUBE','ROLL','PACK','BOX','PAR','SHEET','LAMINA'].map(u=>`<option ${u===ub?'selected':''}>${u}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Large Unit <span style="font-size:10px;color:var(--text3)">(purchase/dispatch unit)</span></label>
           <select id="em-ug">
-            ${['BUNDLE','BOX','PACK','ROLL','PALLET','SET','PAR','UNIT','BAG'].map(u=>`<option ${u===ug?'selected':''}>${u}</option>`).join('')}
+            ${['BUNDLE','BOX','PACK','ROLL','PALLET','SET','PAR','UNIT','BAG','LAMINA'].map(u=>`<option ${u===ug?'selected':''}>${u}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Min Unit <span style="font-size:10px;color:var(--text3)">(smallest selectable unit)</span></label>
+          <select id="em-ubmin">
+            ${['BAG','UNIT','TUBE','ROLL','SHEET','LAMINA','SET','BOX','BUNDLE','PACK'].map(u=>`<option ${u===(ubmin||ubm)?'selected':''}>${u}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Conversion Factor <span style="font-size:10px;color:var(--text3)">(1 large = ? base units)</span></label>
@@ -2059,8 +2069,10 @@ window.saveEditMaterial = async function(btn) {
     .map(b => ({ material_id: id, bodega: b, stock_minimo: parseInt(document.getElementById('em-min-' + b)?.value) || 0 }))
     .filter(r => document.getElementById('em-min-' + r.bodega));
   try {
+    const ubmin_val = document.getElementById('em-ubmin')?.value || ub;
     const { error } = await sb.from('materiales').update({
       referencia: ref, unidad_base: ub, unidad_grande: ug,
+      unidad_base_minima: ubmin_val,
       factor_conversion: factor, stock_minimo: minimo, descripcion_conversion: desc
     }).eq('id', id);
     if (error) throw error;
@@ -2089,7 +2101,7 @@ window.deactivateMaterial = async function(id, ref) {
 window.showAddMaterial = function() {
   const el = document.getElementById('mat-form-area');
   if (!el) return;
-  const unidades = ['BUNDLE','BAG','BOX','PACKAGE','UNIT','ROLL','SET','TUBE','SHEET','PALLET','PAR','JAR','PACK'];
+  const unidades = ['BUNDLE','BAG','BOX','PACKAGE','UNIT','ROLL','SET','TUBE','SHEET','LAMINA','PALLET','PAR','JAR','PACK'];
   const categorias = ['BATT','MINERAL WOOL','BLOW','SPRAY FOAM','CONSUMIBLE'];
   el.innerHTML = `
     <div class="card" style="max-width:620px;margin-bottom:16px">
