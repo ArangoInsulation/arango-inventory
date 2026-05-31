@@ -801,7 +801,7 @@ async function renderBOL() {
             <div>
               <div style="font-size:10px;color:var(--text2);font-weight:500">PICKUP FROM</div>
               <div style="font-weight:500">ARANGO INSULATION INC.</div>
-              <div style="color:var(--text2);font-size:11px">${STATE.bodega === 'Charlotte' ? '13827 Carowinds Blvd, Charlotte NC' : STATE.bodega === 'Atlanta' ? '149 North 85 Pkwy, Fayetteville GA' : STATE.bodega === 'Orlando' ? 'Orlando, FL' : 'Tennessee'}</div>
+              <div style="color:var(--text2);font-size:11px">${STATE.bodega === 'Charlotte' ? '13827 Carowinds Blvd, Charlotte, NC 28273' : STATE.bodega === 'Atlanta' ? '149 North 85 Parkway, Fayetteville, GA' : STATE.bodega === 'Orlando' ? '444 27th Street, Orlando, FL 32806' : '492 Industrial Drive, Mt. Juliet, TN 37122'}</div>
             </div>
             <div style="text-align:right">
               <div style="font-size:10px;color:var(--text2)">Date</div>
@@ -1041,10 +1041,10 @@ window.printBOL = function() {
   const fechaFmt = new Date(fecha + 'T12:00:00').toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
   const bodega = STATE.bodega;
   const addresses = {
-    Charlotte: '13827 Carowinds Blvd, Charlotte, NC',
+    Charlotte: '13827 Carowinds Blvd, Charlotte, NC 28273',
     Atlanta: '149 North 85 Parkway, Fayetteville, GA',
-    Orlando: 'Orlando, FL',
-    Tennessee: 'Tennessee'
+    Orlando: '444 27th Street, Orlando, FL 32806',
+    Tennessee: '492 Industrial Drive, Mt. Juliet, TN 37122'
   };
 
   const driver = document.getElementById('b-driver')?.value || '';
@@ -1363,15 +1363,29 @@ window.saveIN = async function() {
 // PÁGINA: OUTPUT — historial de salidas
 // ════════════════════════════════════════════════════════════
 async function renderOutput() {
+  const today = new Date().toISOString().slice(0,10);
+  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10);
   let page = 0; const PG = 50;
+
   setTopbarActions(`
-    <input type="search" placeholder="Buscar..." style="width:160px" oninput="filterTable('output-body', this.value)">
-    <button class="btn btn-success" onclick="exportOutputExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar Excel</button>
+    <input type="date" id="out-desde" value="${firstDay}" style="width:130px">
+    <span style="font-size:12px;color:var(--text2)">to</span>
+    <input type="date" id="out-hasta" value="${today}" style="width:130px">
+    <button class="btn btn-primary" onclick="loadOutput()"><i class="ti ti-search"></i> Search</button>
+    <input type="search" placeholder="Search..." style="width:140px" oninput="filterTable('output-body', this.value)">
+    <button class="btn btn-success" onclick="exportOutputExcel()"><i class="ti ti-file-spreadsheet"></i> Export</button>
   `);
 
+  window.loadOutput = async function() {
+    page = 0;
+    await load();
+  };
+
   async function load() {
-    setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando...</div>`);
-    const { data, count } = await sb.from('bill_of_lading')
+    const desde = document.getElementById('out-desde')?.value || '';
+    const hasta = document.getElementById('out-hasta')?.value || '';
+    setContent(`<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Loading...</div>`);
+    let query = sb.from('bill_of_lading')
       .select(`
         id, fecha, wo_number, tracking, driver, installer, notas, created_at,
         registrado_por:profiles!registrado_por(full_name),
@@ -1381,6 +1395,9 @@ async function renderOutput() {
       .eq('bodega', STATE.bodega)
       .order('fecha', { ascending: false })
       .range(page * PG, (page + 1) * PG - 1);
+    if (desde) query = query.gte('fecha', desde);
+    if (hasta) query = query.lte('fecha', hasta);
+    const { data, count } = await query;
 
     const rows = [];
     const shownBolIds = new Set();
@@ -1989,7 +2006,7 @@ window.showEditMaterial = function(id, ref, ub, ug, factor, minimo) {
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="saveEditMaterial()"><i class="ti ti-device-floppy"></i> Guardar</button>
+        <button class="btn btn-primary" id="em-save-btn" onclick="saveEditMaterial(this)"><i class="ti ti-device-floppy"></i> Guardar</button>
         <button class="btn btn-danger" onclick="deactivateMaterial('${id}','${ref.replace(/'/g,"\\'")}')"><i class="ti ti-trash"></i> Desactivar</button>
         <button class="btn" onclick="document.getElementById('mat-form-area').innerHTML=''">Cancelar</button>
       </div>
@@ -2007,8 +2024,7 @@ window.showEditMaterial = function(id, ref, ub, ug, factor, minimo) {
   el.scrollIntoView({ behavior: 'smooth' });
 };
 
-window.saveEditMaterial = async function() {
-  const btn = document.querySelector('#mat-form-area .btn-primary');
+window.saveEditMaterial = async function(btn) {
   if (btn && btn.disabled) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
   try {
@@ -2016,22 +2032,24 @@ window.saveEditMaterial = async function() {
     const ref = document.getElementById('em-ref')?.value.trim();
     const ub = document.getElementById('em-ub')?.value;
     const ug = document.getElementById('em-ug')?.value;
-    const factorRaw = document.getElementById('em-factor')?.value;
-    const minimoRaw = document.getElementById('em-min')?.value;
-    const factor = (factorRaw !== '' && !isNaN(factorRaw)) ? parseInt(factorRaw) : 1;
-    const minimo = (minimoRaw !== '' && !isNaN(minimoRaw)) ? parseInt(minimoRaw) : 0;
-    const desc = document.getElementById('em-desc')?.value.trim() || `1 ${ug} = ${factor} ${ub}s`;
-    if (!ref) { toast('Reference is required', 'error'); return; }
-    const { error } = await sb.from('materiales').update({
+    const factor = parseInt(document.getElementById('em-factor')?.value) || 1;
+    const minimo = parseInt(document.getElementById('em-min')?.value) || 0;
+    const desc = document.getElementById('em-desc')?.value.trim() || ('1 ' + ug + ' = ' + factor + ' ' + ub + 's');
+    if (!id) { toast('Material ID missing', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
+    if (!ref) { toast('Reference is required', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
+    const { data, error } = await sb.from('materiales').update({
       referencia: ref, unidad_base: ub, unidad_grande: ug,
       factor_conversion: factor, stock_minimo: minimo, descripcion_conversion: desc
-    }).eq('id', id);
+    }).eq('id', id).select();
     if (error) throw error;
+    console.log('Material update result:', data);
     toast('Material updated');
     window._materialesCache = null;
+    document.getElementById('mat-form-area').innerHTML = '';
     await renderMaterialesAdmin();
   } catch(e) {
-    toast(e.message, 'error');
+    console.error('saveEditMaterial error:', e);
+    toast(e.message || 'Save failed', 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; }
   }
 };
@@ -2093,40 +2111,40 @@ window.showAddMaterial = function() {
         <i class="ti ti-info-circle"></i> Solo se podrán seleccionar <strong>Unidad Grande</strong> o <strong>Unidad Base</strong> al registrar movimientos. No se podrán usar otras unidades.
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="saveMaterial()"><i class="ti ti-device-floppy"></i> Guardar</button>
+        <button class="btn btn-primary" id="nm-save-btn" onclick="saveMaterial(this)"><i class="ti ti-device-floppy"></i> Guardar</button>
         <button class="btn" onclick="document.getElementById('mat-form-area').innerHTML=''">Cancelar</button>
       </div>
     </div>`;
 };
 
-window.saveMaterial = async function() {
-  const btn = document.querySelector('#mat-form-area .btn-primary');
+window.saveMaterial = async function(btn) {
   if (btn && btn.disabled) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
   try {
     const ref = document.getElementById('nm-ref')?.value.trim();
     const cat = document.getElementById('nm-cat')?.value;
-    const minimoRaw = document.getElementById('nm-min')?.value;
-    const min = (minimoRaw !== '' && !isNaN(minimoRaw)) ? parseInt(minimoRaw) : 0;
+    const min = parseInt(document.getElementById('nm-min')?.value) || 0;
     const ug = document.getElementById('nm-ug')?.value || null;
     const ub = document.getElementById('nm-ub')?.value;
-    const factorRaw = document.getElementById('nm-factor')?.value;
-    const factor = (factorRaw !== '' && !isNaN(factorRaw)) ? parseInt(factorRaw) : 1;
-    const desc = document.getElementById('nm-desc')?.value.trim() || `1 ${ug||ub} = ${factor} ${ub}`;
-    if (!ref) { toast('Enter material reference', 'error'); return; }
-    if (!ub) { toast('Select a base unit', 'error'); return; }
-    const { error } = await sb.from('materiales').insert({
+    const factor = parseInt(document.getElementById('nm-factor')?.value) || 1;
+    const desc = document.getElementById('nm-desc')?.value.trim() || ('1 ' + (ug||ub) + ' = ' + factor + ' ' + ub);
+    if (!ref) { toast('Enter material reference', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
+    if (!ub) { toast('Select a base unit', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; } return; }
+    const { data, error } = await sb.from('materiales').insert({
       referencia: ref, categoria: cat || null, stock_minimo: min,
       unidad_base: ug || ub, unidad_grande: ug || null,
       unidad_base_minima: ub, factor_conversion: factor,
       descripcion_conversion: desc, activo: true
-    });
+    }).select();
     if (error) throw error;
+    console.log('Material insert result:', data);
     toast('Material added');
     window._materialesCache = null;
+    document.getElementById('mat-form-area').innerHTML = '';
     await renderMaterialesAdmin();
   } catch(e) {
-    toast(e.message, 'error');
+    console.error('saveMaterial error:', e);
+    toast(e.message || 'Save failed', 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar'; }
   }
 };
