@@ -620,45 +620,64 @@ async function loadStockTab(tab) {
       const allData = await Promise.all(bodegas.map(b => getStockActual(b).then(d => d.map(i => ({...i, bodega: b})))));
       const flat = allData.flat();
 
-      // Group by material
+      // Group by material keeping categoria
       const byMat = {};
       flat.forEach(i => {
-        if (!byMat[i.referencia]) byMat[i.referencia] = { referencia: i.referencia, bodegas: {} };
+        if (!byMat[i.referencia]) byMat[i.referencia] = { referencia: i.referencia, categoria: i.categoria, bodegas: {} };
         byMat[i.referencia].bodegas[i.bodega] = i;
       });
 
+      // Sort by category then referencia
+      const CAT_ORDER = {'BATT':1,'BLOW':2,'MINERAL WOOL':3,'SPRAY FOAM':4,'CONSUMIBLE':5};
+      const sortedMats = Object.values(byMat).sort((a,b) => {
+        const ca = CAT_ORDER[a.categoria]||9, cb = CAT_ORDER[b.categoria]||9;
+        return ca !== cb ? ca - cb : (a.referencia||'').localeCompare(b.referencia||'');
+      });
+
       const badgeStyle = (s) => s === 'ok' ? 'badge-ok' : s === 'bajo' ? 'badge-low' : 'badge-out';
-      const badgeLabel = (s) => s === 'ok' ? 'OK' : s === 'bajo' ? 'Bajo' : 'Agot.';
+      const badgeLabel = (s) => s === 'ok' ? 'OK' : s === 'bajo' ? 'Low' : 'Out';
+
+      let lastCatG = null;
+      const rows = sortedMats.map(m => {
+        const sep = m.categoria !== lastCatG
+          ? '<tr style="background:var(--bg3)"><td colspan="9" style="padding:5px 10px;font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border2)"><i class="ti ti-tag"></i> ' + (m.categoria||'—') + '</td></tr>'
+          : '';
+        lastCatG = m.categoria;
+        const cells = bodegas.map(b => {
+          const d = m.bodegas[b];
+          if (!d) return '<td style="text-align:right;color:var(--text3)">—</td><td></td>';
+          return '<td style="text-align:right;font-weight:500;color:' + (d.saldo_actual < 0 ? 'var(--red)' : d.saldo_actual < d.stock_minimo ? 'var(--amber)' : 'inherit') + '">' + d.saldo_actual + '</td><td><span class="badge ' + badgeStyle(d.estado_stock) + '">' + badgeLabel(d.estado_stock) + '</span></td>';
+        }).join('');
+        return sep + '<tr><td title="' + m.referencia + '">' + m.referencia + '</td>' + cells + '</tr>';
+      }).join('');
 
       el.innerHTML = `
         <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Inventario de todas las bodegas en una sola vista. Busca con el campo de arriba.</p>
         <div class="tbl-wrap">
-          <table id="stock-table" style="font-size:12px">
-            <thead><tr>
-              <th style="min-width:200px">Material</th>
-              <th style="text-align:right" colspan="2">Charlotte</th>
-              <th style="text-align:right" colspan="2">Atlanta</th>
-              <th style="text-align:right" colspan="2">Orlando</th>
-              <th style="text-align:right" colspan="2">Tennessee</th>
-            </tr>
-            <tr>
-              <th></th>
-              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
-              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
-              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
-              <th style="text-align:right;color:var(--text2)">Saldo</th><th>Estado</th>
-            </tr></thead>
-            <tbody id="stock-body">
-              ${Object.values(byMat).map(m => `<tr>
-                <td title="${m.referencia}">${m.referencia}</td>
-                ${bodegas.map(b => {
-                  const d = m.bodegas[b];
-                  if (!d) return '<td style="text-align:right;color:var(--text3)">—</td><td></td>';
-                  return `<td style="text-align:right;font-weight:500;color:${d.saldo_actual < 0 ? 'var(--red)' : d.saldo_actual < d.stock_minimo ? 'var(--amber)' : 'inherit'}">${d.saldo_actual}</td>
-                          <td><span class="badge ${badgeStyle(d.estado_stock)}">${badgeLabel(d.estado_stock)}</span></td>`;
-                }).join('')}
-              </tr>`).join('')}
-            </tbody>
+          <table id="stock-table" style="font-size:12px;border-collapse:separate;border-spacing:0">
+            <thead>
+              <tr>
+                <th style="min-width:220px;border-bottom:none"></th>
+                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Charlotte</th>
+                <th style="background:transparent;border:none;width:4px"></th>
+                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Atlanta</th>
+                <th style="background:transparent;border:none;width:4px"></th>
+                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Orlando</th>
+                <th style="background:transparent;border:none;width:4px"></th>
+                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Tennessee</th>
+              </tr>
+              <tr>
+                <th style="min-width:220px">Material</th>
+                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
+                <th style="background:transparent;border:none"></th>
+                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
+                <th style="background:transparent;border:none"></th>
+                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
+                <th style="background:transparent;border:none"></th>
+                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="stock-body">${rows}</tbody>
           </table>
         </div>`;
     } catch (e) {
