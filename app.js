@@ -616,9 +616,10 @@ async function loadStockTab(tab) {
   } else if (tab === 'global') {
     el.innerHTML = `<div class="loading-spinner"><i class="ti ti-loader-2 spin"></i> Cargando todas las bodegas...</div>`;
     try {
-      const bodegas = ['Charlotte','Atlanta','Orlando','Tennessee'];
-      const allData = await Promise.all(bodegas.map(b => getStockActual(b).then(d => d.map(i => ({...i, bodega: b})))));
+      const allBodegas = ['Charlotte','Atlanta','Orlando','Tennessee'];
+      const allData = await Promise.all(allBodegas.map(b => getStockActual(b).then(d => d.map(i => ({...i, bodega: b})))));
       const flat = allData.flat();
+      const activeBodegas = allBodegas;
 
       // Group by material keeping categoria
       const byMat = {};
@@ -640,10 +641,10 @@ async function loadStockTab(tab) {
       let lastCatG = null;
       const rows = sortedMats.map(m => {
         const sep = m.categoria !== lastCatG
-          ? '<tr style="background:var(--bg3)"><td colspan="9" style="padding:5px 10px;font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border2)"><i class="ti ti-tag"></i> ' + (m.categoria||'—') + '</td></tr>'
+          ? '<tr style="background:var(--bg3)"><td colspan="' + (activeBodegas.length * 3 + 1) + '" style="padding:5px 10px;font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border2)"><i class="ti ti-tag"></i> ' + (m.categoria||'—') + '</td></tr>'
           : '';
         lastCatG = m.categoria;
-        const cells = bodegas.map(b => {
+        const cells = activeBodegas.map(b => {
           const d = m.bodegas[b];
           if (!d) return '<td style="text-align:right;color:var(--text3)">—</td><td></td>';
           return '<td style="text-align:right;font-weight:500;color:' + (d.saldo_actual < 0 ? 'var(--red)' : d.saldo_actual < d.stock_minimo ? 'var(--amber)' : 'inherit') + '">' + d.saldo_actual + '</td><td><span class="badge ' + badgeStyle(d.estado_stock) + '">' + badgeLabel(d.estado_stock) + '</span></td>';
@@ -658,23 +659,11 @@ async function loadStockTab(tab) {
             <thead>
               <tr>
                 <th style="min-width:220px;border-bottom:none"></th>
-                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Charlotte</th>
-                <th style="background:transparent;border:none;width:4px"></th>
-                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Atlanta</th>
-                <th style="background:transparent;border:none;width:4px"></th>
-                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Orlando</th>
-                <th style="background:transparent;border:none;width:4px"></th>
-                <th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">Tennessee</th>
+                ${activeBodegas.map(b => '<th colspan="2" style="text-align:center;background:var(--navy);color:#fff;border-radius:6px 6px 0 0;padding:6px 10px">' + b + '</th><th style="background:transparent;border:none;width:8px"></th>').join('')}
               </tr>
               <tr>
                 <th style="min-width:220px">Material</th>
-                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
-                <th style="background:transparent;border:none"></th>
-                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
-                <th style="background:transparent;border:none"></th>
-                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
-                <th style="background:transparent;border:none"></th>
-                <th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th>
+                ${activeBodegas.map(() => '<th style="text-align:right;color:var(--text2)">Balance</th><th>Status</th><th style="background:transparent;border:none"></th>').join('')}
               </tr>
             </thead>
             <tbody id="stock-body">${rows}</tbody>
