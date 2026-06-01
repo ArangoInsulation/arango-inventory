@@ -574,24 +574,38 @@ async function loadStockTab(tab) {
         <div class="tbl-wrap">
           <table id="stock-table">
             <thead><tr>
-              <th style="width:38%">Referencia</th>
-              <th style="text-align:right">Inicial</th>
-              <th style="text-align:right;color:var(--green-text)">Entradas</th>
-              <th style="text-align:right;color:var(--red-text)">Salidas</th>
-              <th style="text-align:right">Saldo</th>
-              <th style="text-align:right">Mín.</th>
-              <th>Estado</th>
+              <th style="width:12%">Category</th>
+              <th style="width:36%">Reference</th>
+              <th style="text-align:right">Initial</th>
+              <th style="text-align:right;color:var(--green-text)">IN</th>
+              <th style="text-align:right;color:var(--red-text)">OUT</th>
+              <th style="text-align:right">Balance</th>
+              <th style="text-align:right">Min.</th>
+              <th>Status</th>
             </tr></thead>
             <tbody id="stock-body">
-              ${data.map(i => `<tr>
-                <td title="${i.referencia}">${i.referencia}</td>
-                <td style="text-align:right">${i.stock_inicial}</td>
-                <td style="text-align:right;color:var(--green-text);font-weight:500">+${i.total_entradas}</td>
-                <td style="text-align:right;color:var(--red-text);font-weight:500">-${i.total_salidas}</td>
-                <td style="text-align:right;font-weight:500;color:${i.saldo_actual < 0 ? 'var(--red)' : i.saldo_actual < i.stock_minimo ? 'var(--amber)' : 'inherit'}">${i.saldo_actual}</td>
-                <td style="text-align:right">${i.stock_minimo}</td>
-                <td><span class="badge badge-${i.estado_stock === 'ok' ? 'ok' : i.estado_stock === 'bajo' ? 'low' : 'out'}">${i.estado_stock === 'ok' ? 'OK' : i.estado_stock === 'bajo' ? 'Bajo' : 'Agotado'}</span></td>
-              </tr>`).join('')}
+              ${(() => {
+                const CAT_ORDER = {'BATT':1,'BLOW':2,'MINERAL WOOL':3,'SPRAY FOAM':4,'CONSUMIBLE':5};
+                const sorted = [...data].sort((a,b) => {
+                  const ca = CAT_ORDER[a.categoria]||9, cb = CAT_ORDER[b.categoria]||9;
+                  return ca !== cb ? ca - cb : (a.referencia||'').localeCompare(b.referencia||'');
+                });
+                let lastCat = null;
+                return sorted.map(i => {
+                  const sep = i.categoria !== lastCat ? `<tr style="background:var(--bg3)"><td colspan="8" style="padding:5px 10px;font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border2)"><i class="ti ti-tag"></i> ${i.categoria||'—'}</td></tr>` : '';
+                  lastCat = i.categoria;
+                  return sep + '<tr>' +
+                    '<td><span style="font-size:10px;padding:1px 6px;border-radius:10px;background:var(--blue-light);color:var(--blue-text);font-weight:600">' + (i.categoria||'—') + '</span></td>' +
+                    '<td title="' + i.referencia + '">' + i.referencia + '</td>' +
+                    '<td style="text-align:right">' + i.stock_inicial + '</td>' +
+                    '<td style="text-align:right;color:var(--green-text);font-weight:500">+' + i.total_entradas + '</td>' +
+                    '<td style="text-align:right;color:var(--red-text);font-weight:500">-' + i.total_salidas + '</td>' +
+                    '<td style="text-align:right;font-weight:500;color:' + (i.saldo_actual < 0 ? 'var(--red)' : i.saldo_actual < i.stock_minimo ? 'var(--amber)' : 'inherit') + '">' + i.saldo_actual + '</td>' +
+                    '<td style="text-align:right">' + i.stock_minimo + '</td>' +
+                    '<td><span class="badge badge-' + (i.estado_stock==='ok'?'ok':i.estado_stock==='bajo'?'low':'out') + '">' + (i.estado_stock==='ok'?'OK':i.estado_stock==='bajo'?'Low':'Out') + '</span></td>' +
+                    '</tr>';
+                }).join('');
+              })()}
             </tbody>
           </table>
         </div>`;
@@ -2075,7 +2089,7 @@ window.createUser = async function() {
 
   try {
     const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch('https://elybdaocjkepznfzusdz.supabase.co/functions/v1/create-user', {
+    const res = await fetch('https://elybdaocjkepznfzusdz.supabase.co/functions/v1/quick-handler', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2106,34 +2120,46 @@ async function renderMaterialesAdmin() {
   `);
   // Store materials globally for BOL/IN unit selectors
   window._materialesCache = null;
-  const { data: mats } = await sb.from('materiales').select('*').eq('activo', true).order('referencia');
+  const { data: mats_raw } = await sb.from('materiales').select('*').eq('activo', true).order('referencia');
+  const CAT_ORDER_M = {'BATT':1,'BLOW':2,'MINERAL WOOL':3,'SPRAY FOAM':4,'CONSUMIBLE':5};
+  const mats = (mats_raw||[]).sort((a,b) => {
+    const ca = CAT_ORDER_M[a.categoria]||9, cb = CAT_ORDER_M[b.categoria]||9;
+    return ca !== cb ? ca - cb : (a.referencia||'').localeCompare(b.referencia||'');
+  });
   setContent(`
     <div id="mat-form-area"></div>
     <div class="tbl-wrap">
       <table style="font-size:12px">
         <thead><tr>
-          <th style="min-width:200px">Referencia</th>
-          <th>Unidad base</th>
-          <th>Unidad grande</th>
+          <th>Category</th>
+          <th style="min-width:200px">Reference</th>
+          <th>Base Unit</th>
+          <th>Large Unit</th>
           <th style="text-align:right">Factor</th>
-          <th>Conversión</th>
-          <th style="text-align:right">Stock mín.</th>
-          <th>Acciones</th>
+          <th>Conversion</th>
+          <th style="text-align:right">Min. Stock</th>
+          <th>Actions</th>
         </tr></thead>
         <tbody id="mat-body">
-          ${(mats||[]).map(m=>`<tr>
-            <td style="font-weight:500" title="${m.referencia}">${m.referencia}</td>
-            <td><span class="badge b-blue">${m.unidad_base||'BUNDLE'}</span></td>
-            <td>${m.unidad_grande||'—'}</td>
-            <td style="text-align:right">${m.factor_conversion||1}</td>
-            <td style="font-size:11px;color:var(--text2)">${m.descripcion_conversion||'—'}</td>
-            <td style="text-align:right">${m.stock_minimo}</td>
-            <td>
-              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditMaterial('${m.id}','${m.referencia.replace(/'/g,"\\'")}','${m.unidad_base||'BUNDLE'}','${m.unidad_grande||''}','${m.unidad_base_minima||m.unidad_base||'BAG'}',${m.factor_conversion||1},${m.stock_minimo})">
-                <i class="ti ti-edit"></i> Editar
-              </button>
-            </td>
-          </tr>`).join('')}
+          ${(() => {
+            let lastCat = null;
+            return (mats||[]).map(m => {
+              const sep = m.categoria !== lastCat
+                ? '<tr style="background:var(--bg3)"><td colspan="8" style="padding:5px 10px;font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border2)"><i class=\'ti ti-tag\'></i> ' + (m.categoria||'—') + '</td></tr>'
+                : '';
+              lastCat = m.categoria;
+              return sep + '<tr>' +
+                '<td><span style="font-size:10px;padding:1px 6px;border-radius:10px;background:var(--blue-light);color:var(--blue-text);font-weight:600">' + (m.categoria||'—') + '</span></td>' +
+                '<td style="font-weight:500" title="' + m.referencia + '">' + m.referencia + '</td>' +
+                '<td><span class="badge b-blue">' + (m.unidad_base||'BUNDLE') + '</span></td>' +
+                '<td>' + (m.unidad_grande||'—') + '</td>' +
+                '<td style="text-align:right">' + (m.factor_conversion||1) + '</td>' +
+                '<td style="font-size:11px;color:var(--text2)">' + (m.descripcion_conversion||'—') + '</td>' +
+                '<td style="text-align:right">' + m.stock_minimo + '</td>' +
+                '<td><button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditMaterial(\'' + m.id + '\',\'' + m.referencia.replace(/'/g,"\\'") + '\',\'' + (m.unidad_base||'BUNDLE') + '\',\'' + (m.unidad_grande||'') + '\',\'' + (m.unidad_base_minima||m.unidad_base||'BAG') + '\',' + (m.factor_conversion||1) + ',' + m.stock_minimo + ')"><i class="ti ti-edit"></i> Edit</button></td>' +
+                '</tr>';
+            }).join('');
+          })()}
         </tbody>
       </table>
     </div>`);
@@ -2930,7 +2956,7 @@ async function getStockActual(bodega) {
     return _cache.stock[key].data;
   }
   const { data, error } = await sb.from('stock_actual')
-    .select('referencia,bodega,stock_inicial,total_entradas,total_salidas,saldo_actual,stock_minimo,estado_stock')
+    .select('referencia,bodega,stock_inicial,total_entradas,total_salidas,saldo_actual,stock_minimo,estado_stock,categoria')
     .eq('bodega', bodega)
     .order('referencia');
   if (error) throw error;
